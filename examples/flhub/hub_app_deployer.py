@@ -96,6 +96,17 @@ class HubAppDeployer(AppDeployerSpec):
             json.dump(t2_server_app_config_dict, f, indent=4)
 
         # create job meta for T2
+        t1_meta_path = workspace.get_job_meta_path(job_id)
+        if not os.path.exists(t1_meta_path):
+            return f"missing {t1_meta_path}", None, None
+        with open(t1_meta_path) as file:
+            t1_meta = json.load(file)
+
+        submitter_name = t1_meta.get(JobMetaKey.SUBMITTER_NAME.value, "")
+        submitter_org = t1_meta.get(JobMetaKey.SUBMITTER_ORG.value, "")
+        submitter_role = t1_meta.get(JobMetaKey.SUBMITTER_ROLE.value, "")
+        scope = t1_meta.get(JobMetaKey.SCOPE.value, "")
+
         t2_app_name = "app_" + workspace.site_name
         t2_meta = {
             "name": t2_app_name,
@@ -103,7 +114,11 @@ class HubAppDeployer(AppDeployerSpec):
                 t2_app_name: ["@ALL"]
             },
             "min_clients": 1,
-            "job_id": job_id
+            "job_id": job_id,
+            JobMetaKey.SUBMITTER_NAME.value: submitter_name,
+            JobMetaKey.SUBMITTER_ORG.value: submitter_org,
+            JobMetaKey.SUBMITTER_ROLE.value: submitter_role,
+            JobMetaKey.SCOPE.value: scope
         }
 
         t2_meta_path = workspace.get_job_meta_path(t2_job_id)

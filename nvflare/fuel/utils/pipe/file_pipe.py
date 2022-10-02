@@ -162,5 +162,8 @@ class FilePipe(Pipe):
         return self.get_f(timeout)
 
     def close(self):
-        if self.pipe_path and os.path.exists(self.pipe_path):
-            shutil.rmtree(self.pipe_path)
+        pipe_path = self.pipe_path
+        self.pipe_path = None
+        if pipe_path and os.path.exists(pipe_path):
+            shutil.rmtree(pipe_path)
+

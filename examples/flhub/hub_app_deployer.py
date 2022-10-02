@@ -34,22 +34,24 @@ class HubAppDeployer(AppDeployerSpec):
     def __init__(self):
         AppDeployerSpec.__init__(self)
 
-    def deploy(self,
-               workspace: Workspace,
-               job_id: str,
-               job_meta: dict,
-               app_name: str,
-               app_data: bytes,
-               fl_ctx: FLContext) -> str:
-        # step 1: deploy the T1 app into the workspace
-        deployer = AppDeployer()
-        err = deployer.deploy(workspace, job_id, job_meta, app_name, app_data, fl_ctx)
-        if err:
-            return err
+    def prepare(self,
+                workspace: Workspace,
+                job_id: str,
+                remove_tmp_t2_dir: bool=True) -> (str, dict, bytes):
+        """
+        Prepare T2 job
 
+        Args:
+            workspace:
+            job_id:
+            remove_tmp_t2_dir:
+
+        Returns: error str if any, meta dict, and job bytes to be submitted to T2 store
+
+        """
         server_app_config_path = workspace.get_server_app_config_file_path(job_id)
         if not os.path.exists(server_app_config_path):
-            return f"missing {server_app_config_path}"
+            return f"missing {server_app_config_path}", None, None
 
         # step 2: make a copy of the app for T2
         t1_run_dir = workspace.get_run_dir(job_id)
@@ -63,7 +65,7 @@ class HubAppDeployer(AppDeployerSpec):
             "t1_" + WorkspaceConstants.CLIENT_APP_CONFIG)
 
         if not os.path.exists(t1_client_app_config_path):
-            return f"missing {t1_client_app_config_path}"
+            return f"missing {t1_client_app_config_path}", None, None
 
         shutil.copyfile(t1_client_app_config_path,
                         workspace.get_client_app_config_file_path(job_id))
@@ -71,13 +73,13 @@ class HubAppDeployer(AppDeployerSpec):
         # step 4: modify T2 server's config_fed_server.json to use HubShareableGenerator
         t2_server_app_config_path = workspace.get_server_app_config_file_path(t2_job_id)
         if not os.path.exists(t2_server_app_config_path):
-            return f"missing {t2_server_app_config_path}"
+            return f"missing {t2_server_app_config_path}", None, None
 
         t2_server_component_file = workspace.get_file_path_in_site_config(
             "t2_server_components.json")
 
         if not os.path.exists(t2_server_component_file):
-            return f"missing {t2_server_component_file}"
+            return f"missing {t2_server_component_file}", None, None
 
         with open(t2_server_app_config_path) as file:
             t2_server_app_config_dict = json.load(file)
@@ -93,30 +95,64 @@ class HubAppDeployer(AppDeployerSpec):
         with open(t2_server_app_config_path, "w") as f:
             json.dump(t2_server_app_config_dict, f, indent=4)
 
+        # create job meta for T2
+        t2_app_name = "app_" + workspace.site_name
+        t2_meta = {
+            "name": t2_app_name,
+            "deploy_map": {
+                t2_app_name: ["@ALL"]
+            },
+            "min_clients": 1,
+            "job_id": job_id
+        }
+
+        t2_meta_path = workspace.get_job_meta_path(t2_job_id)
+        with open(t2_meta_path, "w") as f:
+            json.dump(t2_meta, f, indent=4)
+
         # step 5: submit T2 app (as a job) to T1's job store
         t2_job_def = load_job_def(
-            from_path=workspace.get_root_dir(),
+            from_path=workspace.root_dir,
             def_name=t2_job_id
         )
 
         job_validator = JobMetaValidator()
         valid, error, meta = job_validator.validate(t2_job_id, t2_job_def)
         if not valid:
-            return f"invalid T2 job def: {error}"
+            return f"invalid T2 job def: {error}", None, None
 
         # make sure meta contains the right job ID
         t2_jid = meta.get(JobMetaKey.JOB_ID.value, None)
         if not t2_jid:
-            return "missing Job ID from T2 meta!"
+            return "missing Job ID from T2 meta!", None, None
 
         if job_id != t2_jid:
-            return f"T2 Job ID {t2_jid} != T1 Job ID {job_id}"
+            return f"T2 Job ID {t2_jid} != T1 Job ID {job_id}", None, None
+
+        # step 6: remove the temporary job def for T2
+        if remove_tmp_t2_dir:
+            shutil.rmtree(t2_run_dir)
+        return "", meta, t2_job_def
+
+    def deploy(self,
+               workspace: Workspace,
+               job_id: str,
+               job_meta: dict,
+               app_name: str,
+               app_data: bytes,
+               fl_ctx: FLContext) -> str:
+        # step 1: deploy the T1 app into the workspace
+        deployer = AppDeployer()
+        err = deployer.deploy(workspace, job_id, job_meta, app_name, app_data, fl_ctx)
+        if err:
+            return err
+
+        err, meta, t2_job_def = self.prepare(workspace, job_id)
+        if err:
+            return err
 
         engine = fl_ctx.get_engine()
         job_manager = engine.get_component(SystemComponents.JOB_MANAGER)
         assert isinstance(job_manager, JobDefManagerSpec)
         job_manager.create(meta, t2_job_def, fl_ctx)
-
-        # step 6: remove the temporary job def for T2
-        shutil.rmtree(t2_run_dir)
         return ""

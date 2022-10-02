@@ -94,9 +94,11 @@ class SimpleJobDefManager(JobDefManagerSpec):
 
     def create(self, meta: dict, uploaded_content: bytes, fl_ctx: FLContext) -> Dict[str, Any]:
         # validate meta to make sure it has:
+        jid = meta.get(JobMetaKey.JOB_ID.value, None)
+        if not jid:
+            jid = str(uuid.uuid4())
+            meta[JobMetaKey.JOB_ID.value] = jid
 
-        jid = str(uuid.uuid4())
-        meta[JobMetaKey.JOB_ID.value] = jid
         meta[JobMetaKey.SUBMIT_TIME.value] = time.time()
         meta[JobMetaKey.SUBMIT_TIME_ISO.value] = (
             datetime.datetime.fromtimestamp(meta[JobMetaKey.SUBMIT_TIME]).astimezone().isoformat()

@@ -285,6 +285,12 @@ class SystemComponents(object):
     RESOURCE_CONSUMER = "resource_consumer"
 
 
+class JobConstants:
+    SERVER_JOB_CONFIG = "config_fed_server.json"
+    CLIENT_JOB_CONFIG = "config_fed_client.json"
+    META_FILE = "meta.json"
+
+
 class WorkspaceConstants:
     """hard coded file names inside the workspace folder."""
 
@@ -306,7 +312,10 @@ class WorkspaceConstants:
 
     SERVER_STARTUP_CONFIG = "fed_server.json"
     CLIENT_STARTUP_CONFIG = "fed_client.json"
-    JOB_META_FILE = "meta.json"
+    JOB_META_FILE = JobConstants.META_FILE
+
+    SERVER_APP_CONFIG = JobConstants.SERVER_JOB_CONFIG
+    CLIENT_APP_CONFIG = JobConstants.CLIENT_JOB_CONFIG
 
     AUTHORIZATION_CONFIG = "authorization.json"
     DEFAULT_AUTHORIZATION_CONFIG = AUTHORIZATION_CONFIG + ".default"
@@ -316,12 +325,6 @@ class WorkspaceConstants:
     SAMPLE_PRIVACY_CONFIG = PRIVACY_CONFIG + ".sample"
 
     ADMIN_STARTUP_CONFIG = "fed_admin.json"
-
-
-class JobConstants:
-    SERVER_JOB_CONFIG = "config_fed_server.json"
-    CLIENT_JOB_CONFIG = "config_fed_client.json"
-    META_FILE = "meta.json"
 
 
 class SiteType:

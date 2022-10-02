@@ -1,0 +1,27 @@
+{
+  "format_version": 2,
+  "components": [
+    {
+      "id": "shareable_generator",
+      "path": "flhub.hub_shareable_generator.HubShareableGenerator",
+      "args": {
+        "pipe_id": "pipe",
+        "task_name": "train",
+        "task_wait_time": 60,
+        "task_data_poll_interval": 0.5
+      }
+    },
+    {
+      "id": "persistor",
+      "path": "flhub.hub_persistor.HubPersistor",
+      "args": {}
+    },
+    {
+      "id": "pipe",
+      "path": "nvflare.fuel.utils.pipe.file_pipe.FilePipe",
+      "args": {
+        "root_path": "/tmp/flare/pipe/t1_t2b"
+      }
+    }
+  ]
+}

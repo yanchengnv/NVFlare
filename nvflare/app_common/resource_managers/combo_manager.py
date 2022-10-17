@@ -63,7 +63,7 @@ class ComboManager(ResourceManagerSpec, FLComponent):
                 denied = True
                 break
 
-        if self.tokens
+        if self.tokens:
             self.combo_token = str(uuid.uuid4())
         else:
             self.combo_token = ""

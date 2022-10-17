@@ -87,24 +87,78 @@ class FilePipe(Pipe):
         parts = file_name.split(".")
         return ".".join(parts[0 : len(parts) - 1])
 
-    def _create_file(self, dir: str, topic: str, data_bytes):
+    def _create_file(self, to_dir: str, topic: str, data_bytes) -> str:
         file_name = self._topic_to_file_name(topic)
-        file_path = os.path.join(dir, file_name)
+        file_path = os.path.join(to_dir, file_name)
 
-        tmp_name = file_name + ".tmp"
-        tmp_path = os.path.join(self.t_path, tmp_name)
+        tmp_path = os.path.join(self.t_path, file_name)
         with open(tmp_path, "wb") as f:
             f.write(data_bytes)
         os.rename(tmp_path, file_path)
+        return file_path
 
     def clear(self):
         self._clear_dir(self.x_path)
         self._clear_dir(self.y_path)
         self._clear_dir(self.t_path)
 
-    def x_put(self, topic: str, data_bytes):
+    def _monitor_file(self, file_path: str, timeout) -> bool:
+        """
+        Monitor the file until it's read-and-removed by peer, or timed out.
+        If timeout, remove the file.
+
+        Args:
+            file_path:
+            timeout:
+
+        Returns:
+
+        """
+        if not timeout:
+            return False
+        start = time.time()
+        while True:
+            if not os.path.exists(file_path):
+                return True
+            if time.time() - start > timeout:
+                # timed out - try to delete the file
+                try:
+                    os.remove(file_path)
+                except FileNotFoundError:
+                    # the file is read by the peer!
+                    return True
+                return False
+            time.sleep(0.5)
+
+    def x_put(self, topic: str, data_bytes, timeout) -> bool:
+        """
+
+        Args:
+            topic:
+            data_bytes:
+            timeout:
+
+        Returns: tuple of (file_path, whether file is read by the peer)
+
+        """
         # put it in Y's queue
-        self._create_file(self.y_path, topic, data_bytes)
+        file_path = self._create_file(self.y_path, topic, data_bytes)
+        return self._monitor_file(file_path, timeout)
+
+    def _read_file(self, file_path: str):
+        # since reading file may take time and another process may try to delete the file
+        # we move the file to a temp name before reading it
+        file_name = os.path.basename(file_path)
+        topic = self._file_name_to_topic(file_name)
+        tmp_path = os.path.join(self.t_path, file_name)
+        try:
+            os.rename(file_path, tmp_path)
+            with open(tmp_path, mode="rb") as file:  # b is important -> binary
+                data = file.read()
+            os.remove(tmp_path)  # remove this file
+            return topic, data
+        except:
+            return None, None
 
     def _get_next(self, from_dir: str):
         # print('get from dir: {}'.format(from_dir))
@@ -112,14 +166,8 @@ class FilePipe(Pipe):
         if files:
             files = [os.path.join(from_dir, f) for f in files]
             files.sort(key=os.path.getmtime, reverse=False)
-            f = files[0]
-            # print('got file {}'.format(next))
-
-            topic = self._file_name_to_topic(os.path.basename(f))
-            with open(f, mode="rb") as file:  # b is important -> binary
-                data = file.read()
-            os.remove(f)  # remove this file
-            return topic, data
+            file_path = files[0]
+            return self._read_file(file_path)
         else:
             return None, None
 
@@ -143,18 +191,29 @@ class FilePipe(Pipe):
         # read from X's queue
         return self._get_from_dir(self.x_path, timeout)
 
-    def y_put(self, topic: str, data_bytes):
+    def y_put(self, topic: str, data_bytes, timeout) -> bool:
         # put it in X's queue
-        self._create_file(self.x_path, topic, data_bytes)
+        file_path = self._create_file(self.x_path, topic, data_bytes)
+        return self._monitor_file(file_path, timeout)
 
     def y_get(self, timeout=None):
         # read from Y's queue
         return self._get_from_dir(self.y_path, timeout)
 
-    def send(self, topic: str, data: bytes):
+    def send(self, topic: str, data: bytes, timeout=None) -> bool:
+        """
+
+        Args:
+            topic:
+            data:
+            timeout:
+
+        Returns: whether the message is read by peer (if timeout is specified)
+
+        """
         if not self.pipe_path:
             raise RuntimeError('pipe is not open')
-        self.put_f(topic, data)
+        return self.put_f(topic, data, timeout)
 
     def receive(self, timeout=None):
         if not self.pipe_path:

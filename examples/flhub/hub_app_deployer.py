@@ -70,7 +70,7 @@ class HubAppDeployer(AppDeployerSpec):
         shutil.copyfile(t1_client_app_config_path,
                         workspace.get_client_app_config_file_path(job_id))
 
-        # step 4: modify T2 server's config_fed_server.json to use HubShareableGenerator
+        # step 4: modify T2 server's config_fed_server.json to use HubController
         t2_server_app_config_path = workspace.get_server_app_config_file_path(t2_job_id)
         if not os.path.exists(t2_server_app_config_path):
             return f"missing {t2_server_app_config_path}", None, None
@@ -90,6 +90,12 @@ class HubAppDeployer(AppDeployerSpec):
         # update components in the server's config with changed components
         # This will replace shareable_generator with the one defined in t2_server_components.json
         update_components(target_dict=t2_server_app_config_dict, from_dict=t2_server_component_dict)
+
+        # change to use HubController as the workflow for T2
+        t2_wf = t2_server_component_dict.get("workflows", None)
+        if not t2_wf:
+            return f"missing workflows in {t2_server_component_file}"
+        t2_server_app_config_dict["workflows"] = t2_wf
 
         # recreate T2's server app config file
         with open(t2_server_app_config_path, "w") as f:

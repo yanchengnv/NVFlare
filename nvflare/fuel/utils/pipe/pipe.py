@@ -21,7 +21,18 @@ class Pipe(object):
     def clear(self):
         pass
 
-    def send(self, topic: str, data: bytes):
+    def send(self, topic: str, data: bytes, timeout=None) -> bool:
+        """Send message with the specified topic and data to peer.
+
+        Args:
+            topic: topic of the message
+            data: data of the message
+            timeout: if specified, number of secs to wait for the peer to read the message.
+
+        Returns: whether the message is read by the peer.
+        If timeout is not specified, always return False.
+
+        """
         pass
 
     def receive(self, timeout=None) -> (str, bytes):

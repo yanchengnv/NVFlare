@@ -3,16 +3,16 @@
 
   "operators": {
     "train": {
-      "method": "bcast",
-      "aggregator_id": "aggregator",
+      "op": "bcast",
+      "aggregator": "aggregator",
       "timeout": 600
     },
     "submit_model": {
-      "method": "bcast",
+      "op": "submit_local_model",
       "timeout": 5
     },
     "validate_model": {
-      "method": "bcast",
+      "op": "bcast",
       "timeout": 10
     }
   },
@@ -20,6 +20,11 @@
     {
       "id": "aggregator",
       "name": "InTimeAccumulateWeightedAggregator",
+      "args": {}
+    },
+    {
+      "id": "submit_local_model",
+      "path": "whatever",
       "args": {}
     }
   ]

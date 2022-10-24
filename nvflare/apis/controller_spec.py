@@ -39,7 +39,7 @@ class TaskCompletionStatus(Enum):
 class TaskOperatorKey(object):
 
     OP_ID = "op_id"
-    METHOD = 'method'           # bcast, relay, etc.
+    OP = 'op'           # bcast, relay, etc.
     NUM_ROUNDS = 'num_rounds'
     TARGETS = 'targets'         # list of leaf nodes
     DATA_FILTERS = 'data_filters'

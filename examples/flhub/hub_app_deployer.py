@@ -17,6 +17,7 @@ import os
 import shutil
 
 from nvflare.apis.app_deployer_spec import AppDeployerSpec, FLContext
+from nvflare.apis.fl_component import FLComponent
 from nvflare.apis.fl_constant import WorkspaceConstants, SystemComponents
 from nvflare.apis.job_def import JobMetaKey
 from nvflare.apis.job_def_manager_spec import JobDefManagerSpec
@@ -29,10 +30,11 @@ from nvflare.private.fed.utils.app_deployer import AppDeployer
 from nvflare.private.fed.server.job_meta_validator import JobMetaValidator
 
 
-class HubAppDeployer(AppDeployerSpec):
+class HubAppDeployer(AppDeployerSpec, FLComponent):
 
     def __init__(self):
         AppDeployerSpec.__init__(self)
+        FLComponent.__init__(self)
 
     def prepare(self,
                 workspace: Workspace,
@@ -94,7 +96,7 @@ class HubAppDeployer(AppDeployerSpec):
         # change to use HubController as the workflow for T2
         t2_wf = t2_server_component_dict.get("workflows", None)
         if not t2_wf:
-            return f"missing workflows in {t2_server_component_file}"
+            return f"missing workflows in {t2_server_component_file}", None, None
         t2_server_app_config_dict["workflows"] = t2_wf
 
         # recreate T2's server app config file
@@ -166,10 +168,12 @@ class HubAppDeployer(AppDeployerSpec):
         deployer = AppDeployer()
         err = deployer.deploy(workspace, job_id, job_meta, app_name, app_data, fl_ctx)
         if err:
+            self.log_error(fl_ctx, f"Failed to deploy job {job_id}: {err}")
             return err
 
         err, meta, t2_job_def = self.prepare(workspace, job_id)
         if err:
+            self.log_error(fl_ctx, f"Failed to deploy job {job_id}: {err}")
             return err
 
         engine = fl_ctx.get_engine()

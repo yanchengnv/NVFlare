@@ -33,9 +33,9 @@ from .any_relay_manager import AnyRelayTaskManager
 from .bcast_manager import BcastForeverTaskManager, BcastTaskManager
 from .send_manager import SendTaskManager
 from .seq_relay_manager import SequentialRelayTaskManager
-from .task_manager import TaskCheckStatus, TaskManager
+from .task_manager import TaskCheckStatus, TaskManager, TASK_PROP_KEY_ENGINE
 
-_TASK_KEY_ENGINE = "___engine"
+_TASK_KEY_ENGINE = TASK_PROP_KEY_ENGINE
 _TASK_KEY_MANAGER = "___mgr"
 _TASK_KEY_DONE = "___done"
 

@@ -19,7 +19,7 @@ from nvflare.apis.controller_spec import ClientTask, Task, TaskCompletionStatus
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.server_engine_spec import ServerEngineSpec
 
-from .task_manager import TaskCheckStatus, TaskManager
+from .task_manager import TaskCheckStatus, TaskManager, TASK_PROP_KEY_ENGINE
 
 _KEY_MIN_RESPS = "__min_responses"
 _KEY_WAIT_TIME_AFTER_MIN_RESPS = "__wait_time_after_min_received"
@@ -57,7 +57,7 @@ class BcastTaskManager(TaskManager):
         if task.targets:
             num_expected_clients = len(task.targets)
         else:
-            engine = task.get_prop("___engine")
+            engine = task.props.get(TASK_PROP_KEY_ENGINE)
             assert isinstance(engine, ServerEngineSpec)
             num_expected_clients = len(engine.get_clients())
 

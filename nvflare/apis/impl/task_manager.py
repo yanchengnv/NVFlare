@@ -21,6 +21,9 @@ from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import Shareable
 
 
+TASK_PROP_KEY_ENGINE = "___engine"
+
+
 class TaskCheckStatus(Enum):
 
     SEND = 1  # send the task to the client

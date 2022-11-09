@@ -59,6 +59,17 @@ for SYSTEM in "t2a" "t2b"; do
     sed -i "s|/tmp/nvflare/jobs-storage|/tmp/flare/jobs/${SYSTEM}|g" ${T2_SERVER_LOCAL}/resources.json
 done
 ```
+Enable only one job at a time:
+```
+# move resources file for t1 server
+SERVER_LOCAL=./workspaces/t1_workspace/localhost/local
+mv ${SERVER_LOCAL}/resources.json.default ${SERVER_LOCAL}/resources.json
+# set max_jobs value
+for SYSTEM in "t1" "t2a" "t2b"; do
+    SERVER_LOCAL=./workspaces/${SYSTEM}_workspace/localhost/local
+    sed -i 's|"max_jobs": 4|"max_jobs": 1|g' ${SERVER_LOCAL}/resources.json
+done
+```
 
 ### 2.3 Disable BYOC (custom code) for everyone
 Moving `authorization.json.default` to `authorization.json` to activate the changes.

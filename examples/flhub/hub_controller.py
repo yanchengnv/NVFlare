@@ -106,10 +106,11 @@ class HubController(Controller):
             self.pipe_monitor = PipeMonitor(self.pipe, self._run_status_changed)
             self.pipe_monitor.start()
             self._control_flow(abort_signal, fl_ctx)
-            self.pipe_monitor.stop()
         except BaseException as ex:
             traceback.print_exc()
             self._abort(f"control_flow exception {ex}", abort_signal, fl_ctx)
+        finally:
+            self.pipe_monitor.stop()
 
     def _control_flow(self, abort_signal: Signal, fl_ctx: FLContext):
         start = time.time()
@@ -193,8 +194,8 @@ class HubController(Controller):
                     return
 
                 try:
-                    self.fire_event(AppEventType.ROUND_STARTED, fl_ctx)
                     fl_ctx.set_prop(key=FLContextKey.TASK_DATA, value=data, private=True, sticky=False)
+                    self.fire_event(AppEventType.ROUND_STARTED, fl_ctx)
                     self.current_task_name = task_name
                     self.current_task_id = task_id
                     self.task_abort_signal = abort_signal

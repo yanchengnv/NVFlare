@@ -272,6 +272,12 @@ class RunProcessKey(object):
     PARTICIPANTS = "_participants"
 
 
+class JobConstants:
+    SERVER_JOB_CONFIG = "config_fed_server.json"
+    CLIENT_JOB_CONFIG = "config_fed_client.json"
+    META_FILE = "meta.json"
+
+
 class SystemComponents(object):
 
     JOB_SCHEDULER = "job_scheduler"
@@ -283,12 +289,7 @@ class SystemComponents(object):
     CANCEL_RESOURCE_PROCESSOR = "cancel_resource_processor"
     RESOURCE_MANAGER = "resource_manager"
     RESOURCE_CONSUMER = "resource_consumer"
-
-
-class JobConstants:
-    SERVER_JOB_CONFIG = "config_fed_server.json"
-    CLIENT_JOB_CONFIG = "config_fed_client.json"
-    META_FILE = "meta.json"
+    APP_DEPLOYER = "app_deployer"
 
 
 class WorkspaceConstants:

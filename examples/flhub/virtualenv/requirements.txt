@@ -5,3 +5,5 @@ fire
 ipywidgets
 pytorch-ignite>=0.4.10
 monai==1.0.1
+monai_nvflare==0.2.1
+xgboost==1.7.0rc1

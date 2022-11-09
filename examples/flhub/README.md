@@ -22,10 +22,12 @@ Install requirements
 ```
 export NVFLARE_HOME=${PWD}/../..
 export HUB_EXAMPLE=${NVFLARE_HOME}/examples/flhub
-export PYTHONPATH=${NVFLARE_HOME}:${NVFLARE_HOME}/examples:${NVFLARE_HOME}/integration/monai
+export PYTHONPATH=${NVFLARE_HOME}/examples
 
+pip install -e ${NVFLARE_HOME}
 pip install -r ./virtualenv/requirements.txt
-pip install -r ${NVFLARE_HOME}/requirements-min.txt
+# uninstall the official release version installed by monai_nvflare (see ./virtualenv/requirements.txt)
+pip uninstall nvflare
 ```
 
 ## 2. Create your FL workspaces and start all FL systems

@@ -417,6 +417,7 @@ class HubController(Controller):
         # A late reply is received from client.
         # We'll include the late reply into the aggregation only if it's for the same type of tasks (i.e.
         # same task name). Note that the same task name could be used many times (rounds).
+        self.log_warning(fl_ctx, f"Late result received from task {task_name}")
         aggr = self.current_aggregator
         if task_name == self.current_task_name and aggr:
             aggr.accept(result, fl_ctx)

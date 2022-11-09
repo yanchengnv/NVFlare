@@ -60,7 +60,17 @@ for SYSTEM in "t2a" "t2b"; do
 done
 ```
 
-### 2.3 Start FL systems
+### 2.3 Disable BYOC (custom code) for everyone
+Moving `authorization.json.default` to `authorization.json` to activate the changes.
+```
+for AUTH_FILE in $(find ./workspaces -name authorization.json.default); do
+    NEW_AUTH_FILE=${AUTH_FILE/'.default'/''}
+    mv ${AUTH_FILE} ${NEW_AUTH_FILE}
+    python3 disable_byoc.py ${NEW_AUTH_FILE}
+done
+```
+
+### 2.4 Start FL systems
 
 # T1 system with 2 clients (a & b)
 ```

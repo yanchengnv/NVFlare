@@ -11,64 +11,137 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os.path
+from typing import Dict
+from .attestation import Attestation, Environment, Devices
 
-from typing import List
+
+class VerifierProp:
+
+    DEVICES = "devices"   # GPU, CPU, etc.
+    ENV = "env"
+    URL = "url"
+    APPRAISAL_POLICY_FILE = "appraisal_policy_file"
+    RESULT_POLICY_FILE = "result_policy_file"
+
+
+class Device:
+
+    GPU = "gpu"
+    CPU = "cpu"
+    NIC = "nic"
+    OS = "os"
+    DPU = "dpu"
+
+    mapping = {
+        GPU: Devices.GPU,
+        CPU: Devices.CPU,
+        NIC: Devices.NIC,
+        OS: Devices.OS,
+        DPU: Devices.DPU
+    }
+
+
+class Env:
+
+    TEST = "test"
+    LOCAL = "local"
+    AZURE = "azure"
+    GCP = "gcp"
+
+    mapping = {
+        TEST: Environment.TEST,
+        LOCAL: Environment.LOCAL,
+        AZURE: Environment.AZURE,
+        GCP: Environment.GCP
+    }
 
 
 class AttestationHelper(object):
 
-    def __init__(self,
-                 site_name: str,
-                 attestation_service_endpoint: str,
-                 orchestration_server_endpoint: str):
+    def __init__(
+            self,
+            site_name: str,
+            verifiers: list
+    ):
         """Create an AttestationHelper instance
 
         Args:
             site_name: name of the site
-            attestation_service_endpoint: endpoint of the attestation service
-            orchestration_server_endpoint: endpoint of the orchestration server
+            verifiers: dict that specifies verifiers to be used
         """
         self.site_name = site_name
-        self.attestation_service_endpoint = attestation_service_endpoint
-        self.orchestration_server_endpoint = orchestration_server_endpoint
+        self.verifiers = verifiers
+        attestation = Attestation()
+        attestation.set_name(site_name)
+        self.attestation = attestation
+        self.token = None
+        for v in verifiers:
+            assert isinstance(v, dict)
+            url = None
+            env = None
+            devices = 0
+            appraisal_policy_file = None
+            result_policy_file = None
+            for prop, value in v.items():
+                if prop == VerifierProp.URL:
+                    url = value
+                elif prop == VerifierProp.ENV:
+                    env = Env.mapping.get(value)
+                elif prop == VerifierProp.DEVICES:
+                    assert isinstance(v, list)
+                    for d in value:
+                        dv = Device.mapping.get(d)
+                        if not dv:
+                            raise ValueError(f"invalid device '{d}'")
+                        devices += dv
+                elif prop == VerifierProp.APPRAISAL_POLICY_FILE:
+                    appraisal_policy_file = value
+                elif prop == VerifierProp.RESULT_POLICY_FILE:
+                    result_policy_file = value
+            if not env:
+                raise ValueError("Environment is not specified for verifier")
+            if not devices:
+                raise ValueError("Devices is not specified for verifier")
+            if not url:
+                raise ValueError("Url is not specified for verifier")
+            if not appraisal_policy_file:
+                raise ValueError("Appraisal policy file is not specified for verifier")
+            if not os.path.exists(appraisal_policy_file):
+                raise ValueError(f"Appraisal policy file '{appraisal_policy_file}' does not exist")
+            if not result_policy_file:
+                raise ValueError("Result policy file is not specified for verifier")
+            if not os.path.exists(result_policy_file):
+                raise ValueError(f"Result policy file '{result_policy_file}' does not exist")
+            attestation.add_verifier(devices, env, url, appraisal_policy_file, result_policy_file)
 
     def reset_participant(self, participant_name: str):
         pass
 
-    def prepare(
-            self,
-            claim_policy_file_path: str,
-            requirement_policy_file_path: str) -> str:
+    def prepare(self) -> bool:
         """Prepare for attestation process
-        This is a complex step that performs multiple interactions with the attestation service
-        and the orchestration server:
-            - load claim policy and requirement policy
-            - register the claim policy with the attestation service
-            - get a CC token from the attestation service.
-            - register the token with the orchestration server
-
-        Args:
-            claim_policy_file_path: path to the claim policy
-            requirement_policy_file_path: path to the requirement policy
 
         Returns: error if any
-
         """
-        pass
+        ok = self.attestation.attest()
+        if ok:
+            self.token = self.attestation.get_token(self.site_name)
+        return ok
+
+    def get_token(self):
+        return self.token
 
     def validate_participants(
             self,
-            participants: List[str]) -> str:
+            participants: Dict[str, str]) -> dict[str, bool]:
         """Validate CC policies of specified participants against the requirement policy of the site.
-            - get CC tokens of the participants from the Orchestration Server
-            - get claim policies from the Attestation Service based of the participants using their tokens
-            - check the participants claim policies against the requirement policy of the site to see
-            whether requirements are satisfied.
 
         Args:
-            participants: list of participant names
+            participants: dict of participant name => token
 
-        Returns: error if any
+        Returns: dict of participant name => bool
 
         """
-        pass
+        if not participants:
+            return {}
+        return self.attestation.validate_tokens(participants)

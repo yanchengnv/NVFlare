@@ -20,7 +20,9 @@ import sys
 import time
 
 from nvflare.apis.event_type import EventType
-from nvflare.apis.fl_constant import JobConstants, SiteType, WorkspaceConstants
+from nvflare.apis.fl_component import FLComponent
+from nvflare.apis.fl_constant import JobConstants, SiteType, WorkspaceConstants, FLContextKey, ReservedKey
+from nvflare.apis.fl_context import FLContext
 from nvflare.apis.workspace import Workspace
 from nvflare.fuel.common.excepts import ConfigError
 from nvflare.fuel.utils.argument_utils import parse_vars
@@ -32,6 +34,7 @@ from nvflare.private.fed.client.client_engine import ClientEngine
 from nvflare.private.fed.client.fed_client import FederatedClient
 from nvflare.private.fed.utils.fed_utils import add_logfile_handler, fobs_initialize, security_init
 from nvflare.private.privacy_manager import PrivacyService
+from nvflare.private.event import fire_event
 from nvflare.security.logging import secure_format_exception
 
 
@@ -108,7 +111,15 @@ def main():
         federated_client.config_folder = config_folder
 
         if rank == 0:
-            federated_client.register()
+            handlers = [x for x in federated_client.components.values() if isinstance(x, FLComponent)]
+            fl_ctx = FLContext()
+            client_name = kv_list.get("uid")
+            fl_ctx.set_prop(key=ReservedKey.IDENTITY_NAME, value=client_name, private=True, sticky=False)
+            fire_event(EventType.SYSTEM_BOOTSTRAP, handlers, fl_ctx)
+
+            fire_event(EventType.BEFORE_CLIENT_REGISTER, handlers, fl_ctx)
+            token = fl_ctx.get_prop(key=FLContextKey.CLIENT_TOKEN, default="")
+            federated_client.register(token)
 
         if not federated_client.token:
             print("The client could not register to server. ")

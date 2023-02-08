@@ -337,6 +337,10 @@ class FederatedServer(BaseServer, fed_service.FederatedTrainingServicer, admin_s
         with self.engine.new_context() as fl_ctx:
             state_check = self.server_state.register(fl_ctx)
             self._handle_state_check(context, state_check)
+            received_token = request.token
+            fl_ctx.set_prop(key=FLContextKey.CLIENT_TOKEN, value=received_token, sticky=False, private=True)
+            fl_ctx.set_prop(key=FLContextKey.CLIENT_NAME, value=request.client_name, sticky=False, private=True)
+            self.engine.fire_event(EventType.CLIENT_REGISTERED, fl_ctx=fl_ctx)
 
             token = self.client_manager.authenticate(request, context)
             if token:

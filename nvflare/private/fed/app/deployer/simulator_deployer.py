@@ -69,7 +69,7 @@ class SimulatorDeployer(ServerDeployer):
         deployer.build(build_ctx)
         federated_client = deployer.create_fed_client(args)
 
-        federated_client.register()
+        federated_client.register(token="")
         federated_client.start_heartbeat()
         federated_client.run_manager = None
 

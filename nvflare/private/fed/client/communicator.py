@@ -163,7 +163,7 @@ class Communicator:
             channel = grpc.insecure_channel(**channel_dict, compression=self.compression)
         return channel
 
-    def client_registration(self, client_name, servers, project_name):
+    def client_registration(self, client_name, servers, project_name, token):
         """Client's metadata used to authenticate and communicate.
 
         Args:
@@ -178,6 +178,7 @@ class Communicator:
         local_ip = _get_client_ip()
 
         login_message = fed_msg.ClientLogin(client_name=client_name, client_ip=local_ip)
+        login_message.token = token
         login_message.meta.project.name = project_name
 
         with self.set_up_channel(servers[project_name]) as channel:

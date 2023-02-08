@@ -144,6 +144,7 @@ class FLContextKey(object):
     CLIENT_RESOURCE_SPECS = "__client_resource_specs"
     JOB_PARTICIPANTS = "__job_participants"
     JOB_BLOCK_REASON = "__job_block_reason"  # why the job should be blocked from scheduling
+    CLIENT_TOKEN = "__client_token"
 
 
 class ReservedTopic(object):

@@ -201,16 +201,12 @@ class CIFAR10ModelLearner(ModelLearner):  # does not support CIFAR10ScaffoldLear
 
     def local_train(self, train_loader, model_global, val_freq: int = 0):
         for epoch in range(self.aggregation_epochs):
-            if self.is_aborted():
-                return
             self.model.train()
             epoch_len = len(train_loader)
             self.epoch_global = self.epoch_of_start_time + epoch
             self.info(f"Local epoch {self.site_name}: {epoch + 1}/{self.aggregation_epochs} (lr={self.lr})")
             avg_loss = 0.0
             for i, (inputs, labels) in enumerate(train_loader):
-                if self.is_aborted():
-                    return
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 # zero the parameter gradients
                 self.optimizer.zero_grad()
@@ -246,10 +242,6 @@ class CIFAR10ModelLearner(ModelLearner):  # does not support CIFAR10ScaffoldLear
 
     def train(self, model: FLModel) -> Union[str, FLModel]:
         self._create_datasets()
-
-        # Check abort signal
-        if self.is_aborted():
-            return ReturnCode.TASK_ABORTED
 
         # get round information
         self.info(f"Current/Total Round: {self.current_round + 1}/{self.total_rounds}")
@@ -288,15 +280,10 @@ class CIFAR10ModelLearner(ModelLearner):  # does not support CIFAR10ScaffoldLear
             model_global=model_global,
             val_freq=1 if self.central else 0,
         )
-        if self.is_aborted():
-            return ReturnCode.TASK_ABORTED
-
         self.epoch_of_start_time += self.aggregation_epochs
 
         # perform valid after local train
         acc = self.local_valid(self.valid_loader, tb_id="val_acc_local_model")
-        if self.is_aborted():
-            return ReturnCode.TASK_ABORTED
         self.info(f"val_acc_local_model: {acc:.4f}")
 
         # save model
@@ -351,8 +338,6 @@ class CIFAR10ModelLearner(ModelLearner):  # does not support CIFAR10ScaffoldLear
         with torch.no_grad():
             correct, total = 0, 0
             for _i, (inputs, labels) in enumerate(valid_loader):
-                if self.is_aborted():
-                    return None
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 outputs = self.model(inputs)
                 _, pred_label = torch.max(outputs.data, 1)
@@ -366,10 +351,6 @@ class CIFAR10ModelLearner(ModelLearner):  # does not support CIFAR10ScaffoldLear
 
     def validate(self, model: FLModel) -> Union[str, FLModel]:
         self._create_datasets()
-
-        # Check abort signal
-        if self.is_aborted():
-            return ReturnCode.TASK_ABORTED
 
         # get validation information
         self.info(f"Client identity: {self.site_name}")
@@ -405,16 +386,12 @@ class CIFAR10ModelLearner(ModelLearner):  # does not support CIFAR10ScaffoldLear
             self.train_loader,
             tb_id="train_acc_global_model" if validate_type == ValidateType.BEFORE_TRAIN_VALIDATE else None,
         )
-        if self.is_aborted():
-            return ReturnCode.TASK_ABORTED
         self.info(f"training acc ({model_owner}): {train_acc:.4f}")
 
         val_acc = self.local_valid(
             self.valid_loader,
             tb_id="val_acc_global_model" if validate_type == ValidateType.BEFORE_TRAIN_VALIDATE else None,
         )
-        if self.is_aborted():
-            return ReturnCode.TASK_ABORTED
         self.info(f"validation acc ({model_owner}): {val_acc:.4f}")
         self.info("Evaluation finished. Returning result")
 

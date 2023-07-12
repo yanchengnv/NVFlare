@@ -539,15 +539,18 @@ class FederatedServer(BaseServer):
 
         # also check jobs that are running on server but not on the client
         jobs_on_server_but_not_on_client = list(set(server_jobs).difference(client_jobs))
+        print(f"===== jobs_on_server_but_not_on_client: {jobs_on_server_but_not_on_client}")
         if jobs_on_server_but_not_on_client:
             # notify all the participating clients these jobs are not running on server anymore
             for job_id in jobs_on_server_but_not_on_client:
                 job_info = self.engine.run_processes[job_id]
                 participating_clients = job_info.get(RunProcessKey.PARTICIPANTS, None)
+                print(f"====== participating_clients: {participating_clients}")
                 if participating_clients:
                     # this is a dict: token => nvflare.apis.client.Client
                     client = participating_clients.get(client_token, None)
                     if client:
+                        print(f"===== notify dead job to {client}")
                         self._notify_dead_job(client, job_id)
 
         return jobs_need_abort
@@ -559,6 +562,8 @@ class FederatedServer(BaseServer):
                 shareable.set_header(ServerCommandKey.FL_CLIENT, client.name)
                 fqcn = FQCN.join([FQCN.ROOT_SERVER, job_id])
                 request = new_cell_message({}, fobs.dumps(shareable))
+
+                print(f"===== send {ServerCommandNames.HANDLE_DEAD_JOB} to {fqcn}")
                 self.cell.fire_and_forget(
                     targets=fqcn,
                     channel=CellChannel.SERVER_COMMAND,

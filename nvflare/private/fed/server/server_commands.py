@@ -264,6 +264,7 @@ class HandleDeadJobCommand(CommandProcessor):
 
         """
         client_name = data.get_header(ServerCommandKey.FL_CLIENT)
+        print(f"===== handle dead job notify from: {client_name}")
         server_runner = fl_ctx.get_prop(FLContextKey.RUNNER)
         if server_runner:
             server_runner.handle_dead_job(client_name, fl_ctx)

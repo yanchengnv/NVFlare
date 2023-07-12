@@ -60,6 +60,8 @@ class ServerCommandAgent(object):
         command_name = request.get_header(MessageHeaderKey.TOPIC)
         data = fobs.loads(request.payload)
 
+        print(f"==== Received command name: {command_name}")
+
         token = request.get_header(CellMessageHeaderKeys.TOKEN, None)
         # client_name = request.get_header(CellMessageHeaderKeys.CLIENT_NAME, None)
         client = None

@@ -104,7 +104,6 @@ class FLModelUtils:
         current_round = shareable.get_header(AppConstants.CURRENT_ROUND, None)
         total_rounds = shareable.get_header(AppConstants.NUM_ROUNDS, None)
         validate_type = shareable.get_header(AppConstants.VALIDATE_TYPE, None)
-        print("######1 utils validate_type", validate_type)
 
         kwargs[FLModelConst.CURRENT_ROUND] = current_round
         kwargs[FLModelConst.TOTAL_ROUNDS] = total_rounds

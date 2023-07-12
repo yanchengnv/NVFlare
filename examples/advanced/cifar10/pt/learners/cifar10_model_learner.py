@@ -81,7 +81,6 @@ class CIFAR10ModelLearner(ModelLearner):  # does not support CIFAR10ScaffoldLear
         self.epoch_global = 0
 
         # following will be created in initialize() or later
-        self.app_root = None
         self.local_model_file = None
         self.best_local_model_file = None
         self.writer = None
@@ -106,12 +105,11 @@ class CIFAR10ModelLearner(ModelLearner):  # does not support CIFAR10ScaffoldLear
 
         # when the run starts, this is where the actual settings get initialized for trainer
 
-        # Set the paths according to fl_ctx
-        self.app_root = os.path.join(self.app_root, self.site_name)  # TODO: make self.app_root be client app folder
+        # TODO: make self.app_root be client app folder and remove this line
+        self.app_root = os.path.join(self.app_root, self.site_name)
 
-        fl_args = self.args
         self.info(
-            f"Client {self.site_name} initialized at \n {self.app_root} \n with args: {fl_args}",
+            f"Client {self.site_name} initialized at \n {self.app_root} \n with args: {self.args}",
         )
 
         self.local_model_file = os.path.join(self.app_root, "local_model.pt")
@@ -254,9 +252,7 @@ class CIFAR10ModelLearner(ModelLearner):  # does not support CIFAR10ScaffoldLear
             return ReturnCode.TASK_ABORTED
 
         # get round information
-        current_round = self.current_round
-        total_rounds = self.total_rounds
-        self.info(f"Current/Total Round: {current_round + 1}/{total_rounds}")
+        self.info(f"Current/Total Round: {self.current_round + 1}/{self.total_rounds}")
         self.info(f"Client identity: {self.site_name}")
 
         # update local model weights with received weights

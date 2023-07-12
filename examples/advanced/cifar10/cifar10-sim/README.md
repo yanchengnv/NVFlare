@@ -77,7 +77,7 @@ You can copy the whole block into the terminal, and it will execute each experim
 
 Next, let's try some different FL algorithms on a more heterogeneous split:
 
-[FedProx](https://arxiv.org/abs/1812.06127) adds a regularizer to the loss used in `CIFAR10Learner` (`fedproxloss_mu`)`:
+[FedProx](https://arxiv.org/abs/1812.06127) adds a regularizer to the loss used in `CIFAR10ModelLearner` (`fedproxloss_mu`)`:
 ```
 ./run_simulator.sh cifar10_fedprox 0.1 8 8
 ```

@@ -25,8 +25,8 @@ from pt.utils.cifar10_dataset import CIFAR10_Idx
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import datasets, transforms
 
-from nvflare.apis.dxo import MetaKey
 from nvflare.apis.fl_constant import ReturnCode
+from nvflare.app_common import MetaKey
 from nvflare.app_common.abstract.fl_model import FLModel, ParamsType
 from nvflare.app_common.abstract.model_learner import ModelLearner
 from nvflare.app_common.app_constant import AppConstants, ModelName, ValidateType
@@ -60,7 +60,7 @@ class CIFAR10ModelLearner(ModelLearner):  # does not support CIFAR10ScaffoldLear
             num_workers: number of workers for data loaders.
 
         Returns:
-            a Shareable with the updated local model after running `execute()`
+            an FLModel with the updated local model differences after running `train()`, the metrics after `validate()`,
             or the best local model depending on the specified task.
         """
         super().__init__()
@@ -74,8 +74,6 @@ class CIFAR10ModelLearner(ModelLearner):  # does not support CIFAR10ScaffoldLear
         self.central = central
         self.batch_size = batch_size
         self.num_workers = num_workers
-
-        self.writer = None
         self.analytic_sender_id = analytic_sender_id
 
         # Epoch counter
@@ -84,7 +82,6 @@ class CIFAR10ModelLearner(ModelLearner):  # does not support CIFAR10ScaffoldLear
 
         # following will be created in initialize() or later
         self.app_root = None
-        self.client_id = None
         self.local_model_file = None
         self.best_local_model_file = None
         self.writer = None
@@ -110,6 +107,8 @@ class CIFAR10ModelLearner(ModelLearner):  # does not support CIFAR10ScaffoldLear
         # when the run starts, this is where the actual settings get initialized for trainer
 
         # Set the paths according to fl_ctx
+        self.app_root = os.path.join(self.app_root, self.site_name)  # TODO: make self.app_root be client app folder
+
         fl_args = self.args
         self.info(
             f"Client {self.site_name} initialized at \n {self.app_root} \n with args: {fl_args}",
@@ -164,11 +163,11 @@ class CIFAR10ModelLearner(ModelLearner):  # does not support CIFAR10ScaffoldLear
         if self.train_dataset is None or self.train_loader is None:
             if not self.central:
                 # Set datalist, here the path and filename are hard-coded, can also be fed as an argument
-                site_idx_file_name = os.path.join(self.train_idx_root, self.client_id + ".npy")
+                site_idx_file_name = os.path.join(self.train_idx_root, self.site_name + ".npy")
                 self.info(f"IndexList Path: {site_idx_file_name}")
                 if os.path.exists(site_idx_file_name):
                     self.info("Loading subset index")
-                    site_idx = np.load(site_idx_file_name).tolist()  # TODO: get from fl_ctx/shareable?
+                    site_idx = np.load(site_idx_file_name).tolist()  # TODO: get from server?
                 else:
                     self.stop_task(f"No subset index found! File {site_idx_file_name} does not exist!")
                     return
@@ -209,7 +208,7 @@ class CIFAR10ModelLearner(ModelLearner):  # does not support CIFAR10ScaffoldLear
             self.model.train()
             epoch_len = len(train_loader)
             self.epoch_global = self.epoch_of_start_time + epoch
-            self.info(f"Local epoch {self.client_id}: {epoch + 1}/{self.aggregation_epochs} (lr={self.lr})")
+            self.info(f"Local epoch {self.site_name}: {epoch + 1}/{self.aggregation_epochs} (lr={self.lr})")
             avg_loss = 0.0
             for i, (inputs, labels) in enumerate(train_loader):
                 if self.is_aborted():
@@ -321,7 +320,7 @@ class CIFAR10ModelLearner(ModelLearner):  # does not support CIFAR10ScaffoldLear
                 self.stop_task(f"{name} weights became NaN...")
                 return ReturnCode.EXECUTION_EXCEPTION
 
-        # build the shareable
+        # return an FLModel containing the model differences
         fl_model = FLModel(params_type=ParamsType.DIFF, params=model_diff)
 
         FLModelUtils.set_meta_prop(fl_model, MetaKey.NUM_STEPS_CURRENT_ROUND, epoch_len)
@@ -335,9 +334,9 @@ class CIFAR10ModelLearner(ModelLearner):  # does not support CIFAR10ScaffoldLear
                 # load model to cpu as server might or might not have a GPU
                 model_data = torch.load(self.best_local_model_file, map_location="cpu")
             except Exception as e:
-                raise ValueError("Unable to load best model")
+                raise ValueError("Unable to load best model") from e
 
-            # Create DXO and shareable from model data.
+            # Create FLModel from model data.
             if model_data:
                 # convert weights to numpy to support FOBS
                 model_weights = model_data["model_weights"]
@@ -399,31 +398,33 @@ class CIFAR10ModelLearner(ModelLearner):  # does not support CIFAR10ScaffoldLear
         if n_loaded == 0:
             raise ValueError(f"No weights loaded for validation! Received weight dict is {global_weights}")
 
-        validate_type = FLModelUtils.get_meta_prop(model, AppConstants.VALIDATE_TYPE, ValidateType.MODEL_VALIDATE)
+        # get validation meta info
+        validate_type = FLModelUtils.get_meta_prop(
+            model, MetaKey.VALIDATE_TYPE, ValidateType.MODEL_VALIDATE
+        )  # TODO: enable model.get_meta_prop(...)
         model_owner = self.get_shareable_header(AppConstants.MODEL_OWNER)
-        if validate_type == ValidateType.BEFORE_TRAIN_VALIDATE:
-            # perform valid before local train
-            global_acc = self.local_valid(self.valid_loader, tb_id="val_acc_global_model")
-            if self.is_aborted():
-                return ReturnCode.TASK_ABORTED
-            self.info(f"val_acc_global_model ({model_owner}): {global_acc}")
-            return FLModel(metrics=global_acc)
 
-        elif validate_type == ValidateType.MODEL_VALIDATE:
-            # perform valid
-            train_acc = self.local_valid(self.train_loader)
-            if self.is_aborted():
-                return ReturnCode.TASK_ABORTED
-            self.info(f"training acc ({model_owner}): {train_acc}")
+        # perform valid
+        train_acc = self.local_valid(
+            self.train_loader,
+            tb_id="train_acc_global_model" if validate_type == ValidateType.BEFORE_TRAIN_VALIDATE else None,
+        )
+        if self.is_aborted():
+            return ReturnCode.TASK_ABORTED
+        self.info(f"training acc ({model_owner}): {train_acc:.4f}")
 
-            val_acc = self.local_valid(self.valid_loader)
-            if self.is_aborted():
-                return ReturnCode.TASK_ABORTED
-            self.info(f"validation acc ({model_owner}): {val_acc}")
-            self.info("Evaluation finished. Returning result")
+        val_acc = self.local_valid(
+            self.valid_loader,
+            tb_id="val_acc_global_model" if validate_type == ValidateType.BEFORE_TRAIN_VALIDATE else None,
+        )
+        if self.is_aborted():
+            return ReturnCode.TASK_ABORTED
+        self.info(f"validation acc ({model_owner}): {val_acc:.4f}")
+        self.info("Evaluation finished. Returning result")
 
-            val_results = {"train_accuracy": train_acc, "val_accuracy": val_acc}
-            return FLModel(metrics=val_results)
+        if val_acc > self.best_acc:
+            self.best_acc = val_acc
+            self.save_model(is_best=True)
 
-        else:
-            return ReturnCode.VALIDATE_TYPE_UNKNOWN
+        val_results = {"train_accuracy": train_acc, "val_accuracy": val_acc}
+        return FLModel(metrics=val_results)

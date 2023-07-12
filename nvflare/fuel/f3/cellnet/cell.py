@@ -1394,7 +1394,7 @@ class Cell(MessageReceiver, EndpointMonitor):
 
     def _try_cb(self, message, cb, *args, **kwargs):
         try:
-            self.logger.debug(f"{self.my_info.fqcn}: calling CB {cb.__name__}")
+            self.logger.info(f"{self.my_info.fqcn}: calling CB {cb.__name__}")
             return cb(message, *args, **kwargs)
         except ServiceUnavailable:
             return make_reply(ReturnCode.SERVICE_UNAVAILABLE)
@@ -1422,20 +1422,25 @@ class Cell(MessageReceiver, EndpointMonitor):
             )
 
     def _process_request(self, origin: str, message: Message) -> Union[None, Message]:
-        self.logger.debug(f"{self.my_info.fqcn}: processing incoming request")
+        self.logger.info(f"{self.my_info.fqcn}: processing incoming request")
         decode_payload(message)
         # this is a request for me - dispatch to the right CB
+        self.logger.info(f"{self.my_info.fqcn}: after payload decoded")
         channel = message.get_header(MessageHeaderKey.CHANNEL, "")
         topic = message.get_header(MessageHeaderKey.TOPIC, "")
+
+        self.logger.info(f"{self.my_info.fqcn}: ch={channel}, topic={topic}")
         _cb = self.req_reg.find(channel, topic)
+        self.logger.info(f"{self.my_info.fqcn}: found cb {_cb}")
         if not _cb:
-            self.log_error(f"no callback for request ({topic}@{channel}) from cell '{origin}'", message)
+            self.logger.error(f"{self.my_info.fqcn}: no callback for request ({topic}@{channel}) from cell '{origin}'")
             return make_reply(ReturnCode.PROCESS_EXCEPTION, error="no callback")
 
         # invoke incoming request filters
+        self.logger.info(f"{self.my_info.fqcn}: invoking filters")
         req_filters = self.in_req_filter_reg.find(channel, topic)
         if req_filters:
-            self.logger.debug(f"{self.my_info.fqcn}: invoking incoming request filters")
+            self.logger.info(f"{self.my_info.fqcn}: invoking incoming request filters")
             assert isinstance(req_filters, list)
             for f in req_filters:
                 assert isinstance(f, Callback)
@@ -1444,7 +1449,7 @@ class Cell(MessageReceiver, EndpointMonitor):
                     return reply
 
         assert isinstance(_cb, Callback)
-        self.logger.debug(f"{self.my_info.fqcn}: calling registered request CB")
+        self.logger.info(f"{self.my_info.fqcn}: calling registered request CB")
         cb_start = time.perf_counter()
         reply = self._try_cb(message, _cb.cb, *_cb.args, **_cb.kwargs)
         cb_end = time.perf_counter()
@@ -1649,6 +1654,7 @@ class Cell(MessageReceiver, EndpointMonitor):
         return msg_size / _ONE_MB
 
     def _process_received_msg(self, endpoint: Endpoint, connection: Connection, message: Message):
+        print(f"!!!!!!======= RECEIVED MSG: {message.headers}")
         route = message.get_header(MessageHeaderKey.ROUTE)
         if route:
             origin_name = route[0][0]

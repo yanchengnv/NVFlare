@@ -13,27 +13,28 @@
 # limitations under the License.
 
 import queue
+import threading
 from concurrent import futures
 from typing import Any, Dict, List, Union
 
 import grpc
-import threading
 
 from nvflare.fuel.f3.comm_config import CommConfigurator
 from nvflare.fuel.f3.comm_error import CommError
 from nvflare.fuel.f3.connection import Connection
 from nvflare.fuel.f3.drivers.driver import ConnectorInfo
-from .driver_params import DriverCap, DriverParams
-from .base_driver import BaseDriver
-from .net_utils import MAX_FRAME_SIZE, get_address, get_tcp_urls, ssl_required
-from nvflare.fuel.utils.obj_utils import get_logger
-from nvflare.fuel.f3.drivers.grpc.utils import get_grpc_client_credentials, get_grpc_server_credentials
-
 from nvflare.fuel.f3.drivers.grpc.streamer_pb2_grpc import (
-    StreamerServicer, add_StreamerServicer_to_server, StreamerStub
+    StreamerServicer,
+    StreamerStub,
+    add_StreamerServicer_to_server,
 )
-from .grpc.streamer_pb2 import Frame
+from nvflare.fuel.f3.drivers.grpc.utils import get_grpc_client_credentials, get_grpc_server_credentials
+from nvflare.fuel.utils.obj_utils import get_logger
 
+from .base_driver import BaseDriver
+from .driver_params import DriverCap, DriverParams
+from .grpc.streamer_pb2 import Frame
+from .net_utils import MAX_FRAME_SIZE, get_address, get_tcp_urls, ssl_required
 
 GRPC_DEFAULT_OPTIONS = [
     ("grpc.max_send_message_length", MAX_FRAME_SIZE),
@@ -48,7 +49,6 @@ class QueueClosed(Exception):
 
 
 class QQ:
-
     def __init__(self):
         self.q = queue.Queue()
         self.closed = False
@@ -92,8 +92,8 @@ class StreamConnection(Connection):
         self.oq = oq
         self.closing = False
         self.conn_props = conn_props
-        self.context = context    # for server side
-        self.channel = channel    # for client side
+        self.context = context  # for server side
+        self.channel = channel  # for client side
         self.lock = threading.Lock()
         self.logger = get_logger(self)
 
@@ -152,7 +152,6 @@ class StreamConnection(Connection):
 
 
 class Servicer(StreamerServicer):
-
     def __init__(self, server):
         self.server = server
         self.logger = get_logger(self)
@@ -201,21 +200,17 @@ class Servicer(StreamerServicer):
 
 
 class Server:
-
     def __init__(
-            self,
-            driver,
-            connector,
-            max_workers,
-            options,
+        self,
+        driver,
+        connector,
+        max_workers,
+        options,
     ):
         self.logger = get_logger(self)
         self.driver = driver
         self.connector = connector
-        self.grpc_server = grpc.server(
-            futures.ThreadPoolExecutor(max_workers=max_workers),
-            options=options
-        )
+        self.grpc_server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_workers), options=options)
         servicer = Servicer(self)
         add_StreamerServicer_to_server(servicer, self.grpc_server)
 
@@ -245,7 +240,6 @@ class Server:
 
 
 class GrpcDriver(BaseDriver):
-
     def __init__(self):
         BaseDriver.__init__(self)
         self.server = None

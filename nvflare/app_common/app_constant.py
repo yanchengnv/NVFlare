@@ -217,3 +217,21 @@ class PSIConst(AppConstants):
     REQUEST_MSG = "PSI_REQUEST_MSG"
     REQUEST_MSG_SET = "PSI_REQUEST_MSG_SET"
     RESPONSE_MSG = "PSI_RESPONSE_MSG"
+
+
+class RROrder:
+
+    FIXED = "fixed"
+    RANDOM = "random"
+
+
+class RRKey:
+
+    ORDER = "order"
+    CLIENTS = "clients"
+    NUM_ROUNDS = "num_rounds"
+    LEARNING_TASK = "learning_task"
+    TASK_DATA = "task_data"
+    LAST_ROUND = "last_round"
+    ROUND_START_TIME = "round_start_time"
+    ROUND_END_TIME = "round_end_time"

@@ -225,13 +225,17 @@ class RROrder:
     RANDOM = "random"
 
 
-class RRKey:
+class RRConstant:
 
+    TASK_NAME = "rr"
     ORDER = "order"
     CLIENTS = "clients"
     NUM_ROUNDS = "num_rounds"
-    LEARNING_TASK = "learning_task"
     TASK_DATA = "task_data"
     LAST_ROUND = "last_round"
     ROUND_START_TIME = "round_start_time"
     ROUND_END_TIME = "round_end_time"
+    FINAL_RESULT = "final_result"
+    REASON = "reason"
+    TOPIC_REPORT_STATUS = "rr.report_status"
+    TOPIC_FAILURE = "rr.failure"

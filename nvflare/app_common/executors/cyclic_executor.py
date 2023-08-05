@@ -14,21 +14,17 @@
 import threading
 import time
 
-from nvflare.apis.dxo import MetaKey, from_shareable
 from nvflare.apis.event_type import EventType
 from nvflare.apis.executor import Executor
-from nvflare.apis.fl_constant import ReturnCode, FLContextKey
+from nvflare.apis.fl_constant import FLContextKey, ReturnCode
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import Shareable, make_reply
 from nvflare.apis.signal import Signal
-from nvflare.app_common.abstract.learner_spec import Learner
 from nvflare.app_common.app_constant import AppConstants
 from nvflare.app_common.utils.rr_utils import RRConstant, StatusReport, execution_failure
-from nvflare.security.logging import secure_format_exception
 
 
 class _LearnTask:
-
     def __init__(self, task_name: str, task_data: Shareable, fl_ctx: FLContext):
         self.task_name = task_name
         self.task_data = task_data
@@ -37,16 +33,17 @@ class _LearnTask:
 
 
 class CyclicExecutor(Executor):
-
     def __init__(
         self,
-        rr_task_name=RRConstant.TASK_NAME,
+        rr_task_name=RRConstant.TASK_NAME_RR,
+        submit_result_task_name=RRConstant.TASK_NAME_SUBMIT_RESULT,
         train_task_name=AppConstants.TASK_TRAIN,
         max_status_report_interval: float = 600.0,
         task_check_interval: float = 1.0,
     ):
         super().__init__()
         self.rr_task_name = rr_task_name
+        self.submit_result_task_name = submit_result_task_name
         self.train_task_name = train_task_name
 
         self.max_status_report_interval = max_status_report_interval
@@ -70,6 +67,7 @@ class CyclicExecutor(Executor):
         self.engine = None
         self.me = None
         self.is_starting_client = False
+        self.last_result = None
 
     def handle_event(self, event_type: str, fl_ctx: FLContext):
         if event_type == EventType.START_RUN:
@@ -90,8 +88,7 @@ class CyclicExecutor(Executor):
                 return
 
             self.engine.register_aux_message_handler(
-                topic=RRConstant.TOPIC_LEARN,
-                message_handle_func=self._process_learn_request
+                topic=RRConstant.TOPIC_LEARN, message_handle_func=self._process_learn_request
             )
 
             self.log_info(fl_ctx, "Started learn thread")
@@ -108,6 +105,12 @@ class CyclicExecutor(Executor):
             self.log_info(fl_ctx, "Starting RR!")
             self.is_starting_client = True
             return self._start_rr(shareable, fl_ctx)
+        elif task_name == self.submit_result_task_name:
+            self.log_info(fl_ctx, "Submitting my result")
+            if not self.last_result:
+                self.log_error(fl_ctx, "got request to submit result but I have no result to submit!")
+                return make_reply(ReturnCode.BAD_REQUEST_DATA)
+            return self.last_result
         else:
             self.log_error(fl_ctx, f"Could not handle task: {task_name}")
             return make_reply(ReturnCode.TASK_UNKNOWN)
@@ -136,12 +139,9 @@ class CyclicExecutor(Executor):
 
                     self.log_info(fl_ctx, f"send status report: {request}")
                     resp = self.engine.send_aux_request(
-                        targets=[],
-                        topic=topic,
-                        request=request,
-                        timeout=2.0,
-                        fl_ctx=fl_ctx)
-                    reply = resp.get('server')
+                        targets=[], topic=topic, request=request, timeout=2.0, fl_ctx=fl_ctx
+                    )
+                    reply = resp.get("server")
                     if reply and isinstance(reply, Shareable) and reply.get_return_code() == ReturnCode.OK:
                         self.last_status_report_time = now
             time.sleep(self.status_check_interval)
@@ -176,9 +176,7 @@ class CyclicExecutor(Executor):
         # execute the task
         self.log_info(fl_ctx, f"executing round {current_round}")
 
-        result = self.learn_executor.execute(
-            task.task_name, task_data, fl_ctx, task.abort_signal
-        )
+        result = self.learn_executor.execute(task.task_name, task_data, fl_ctx, task.abort_signal)
 
         self.log_info(fl_ctx, f"finished round {current_round}")
 
@@ -188,6 +186,8 @@ class CyclicExecutor(Executor):
             self.log_error(fl_ctx, f"learn executor failed: {rc}")
             self._set_learn_error(rc)
             return
+
+        self.last_result = result
 
         # see whether we need to send to next leg
         end_time = time.time()
@@ -204,14 +204,11 @@ class CyclicExecutor(Executor):
         my_idx = clients.index(self.me)
         if current_round == num_rounds:
             # am I the last leg?
-            if my_idx == len(clients)-1:
+            if my_idx == len(clients) - 1:
                 # I'm the last leg - the RR is done!
                 self.log_info(fl_ctx, "I'm the last leg - got final result")
                 self.current_status = StatusReport(
-                    last_round=current_round,
-                    start_time=start_time,
-                    end_time=end_time,
-                    final_result=result
+                    last_round=current_round, start_time=start_time, end_time=end_time, final_result="final"
                 )
                 self.status_change_time = end_time
                 return
@@ -225,17 +222,14 @@ class CyclicExecutor(Executor):
         self.status_change_time = end_time
 
         # send to next leg
-        if my_idx < len(clients)-1:
-            next_client = clients[my_idx+1]
+        if my_idx < len(clients) - 1:
+            next_client = clients[my_idx + 1]
         else:
             next_client = clients[0]
 
         resp = self.engine.send_aux_request(
-            targets=[next_client],
-            topic=RRConstant.TOPIC_LEARN,
-            request=result,
-            timeout=2.0,
-            fl_ctx=fl_ctx)
+            targets=[next_client], topic=RRConstant.TOPIC_LEARN, request=result, timeout=2.0, fl_ctx=fl_ctx
+        )
 
         assert isinstance(resp, dict)
         reply = resp.get(next_client)
@@ -280,19 +274,15 @@ class CyclicExecutor(Executor):
                 # should never happen!
                 self.log_error(
                     fl_ctx,
-                    f"logic error: current round {current_round} >= num rounds {num_rounds} for starting client!"
+                    f"logic error: current round {current_round} >= num rounds {num_rounds} for starting client!",
                 )
                 self._set_learn_error(ReturnCode.EXECUTION_EXCEPTION)
                 return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
             # start next round
             self.log_info(fl_ctx, f"Starting new round {current_round+1}")
-            request.set_header(AppConstants.CURRENT_ROUND, current_round+1)
+            request.set_header(AppConstants.CURRENT_ROUND, current_round + 1)
 
         self.log_info(fl_ctx, f"accepted learn request from {sender}")
-        self.learn_task = _LearnTask(
-            task_name=self.train_task_name,
-            task_data=request,
-            fl_ctx=fl_ctx
-        )
+        self.learn_task = _LearnTask(task_name=self.train_task_name, task_data=request, fl_ctx=fl_ctx)
         return make_reply(ReturnCode.OK)

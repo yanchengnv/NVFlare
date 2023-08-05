@@ -18,23 +18,22 @@ from nvflare.apis.client import Client
 from nvflare.apis.controller_spec import TaskCompletionStatus
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.impl.controller import ClientTask, Controller, Task
-from nvflare.apis.shareable import Shareable, make_reply, ReturnCode
+from nvflare.apis.shareable import ReturnCode, Shareable, make_reply
 from nvflare.apis.signal import Signal
 from nvflare.app_common.abstract.learnable_persistor import LearnablePersistor
+from nvflare.app_common.abstract.shareable_generator import ShareableGenerator
 from nvflare.app_common.app_constant import AppConstants
 from nvflare.app_common.utils.rr_utils import (
-    RROrder,
     RRConstant,
+    RROrder,
+    StatusReport,
     learnable_to_shareable,
     shareable_to_learnable,
-    StatusReport,
     status_report_from_shareable,
 )
-from nvflare.app_common.abstract.shareable_generator import ShareableGenerator
 
 
 class ClientStatus:
-
     def __init__(self):
         self.last_report_time = time.time()
         self.num_reports = 0
@@ -42,14 +41,15 @@ class ClientStatus:
 
 
 class RRController(Controller):
-
     def __init__(
         self,
         num_rounds: int,
         persistor_id="persistor",
         shareable_generator_id="shareable_generator",
-        rr_task_name = RRConstant.TASK_NAME,
+        rr_task_name=RRConstant.TASK_NAME_RR,
+        submit_result_task_name=RRConstant.TASK_NAME_SUBMIT_RESULT,
         rr_task_timeout=5,
+        submit_result_task_timeout=5,
         task_check_period: float = 0.5,
         job_status_check_interval: float = 2.0,
         starting_client: str = None,
@@ -58,7 +58,9 @@ class RRController(Controller):
     ):
         Controller.__init__(self, task_check_period)
         self.rr_task_name = rr_task_name
+        self.submit_result_task_name = submit_result_task_name
         self.rr_task_timeout = rr_task_timeout
+        self.submit_result_task_timeout = submit_result_task_timeout
         self.persistor_id = persistor_id
         self.shareable_generator_id = shareable_generator_id
         self.num_rounds = num_rounds
@@ -69,11 +71,13 @@ class RRController(Controller):
         self.persistor = None
         self.shareable_generator = None
         self._learnable = None
-        self._last_learnable = None
         self._client_names = None
         self.client_statuses = {}
         self.rr_started = False
         self.asked_to_stop = False
+        self._final_result_type = None
+        self._final_result_client = None
+        self._last_learnable = None
 
     def start_controller(self, fl_ctx: FLContext):
         self.log_debug(fl_ctx, "starting controller")
@@ -116,13 +120,11 @@ class RRController(Controller):
             self._client_names.insert(0, self.starting_client)
 
         self._engine.register_aux_message_handler(
-            topic=RRConstant.TOPIC_REPORT_STATUS,
-            message_handle_func=self._process_status_report
+            topic=RRConstant.TOPIC_REPORT_STATUS, message_handle_func=self._process_status_report
         )
 
         self._engine.register_aux_message_handler(
-            topic=RRConstant.TOPIC_FAILURE,
-            message_handle_func=self._process_failure
+            topic=RRConstant.TOPIC_FAILURE, message_handle_func=self._process_failure
         )
 
     def control_flow(self, abort_signal: Signal, fl_ctx: FLContext):
@@ -147,7 +149,7 @@ class RRController(Controller):
             name=self.rr_task_name,
             data=shareable,
             timeout=self.rr_task_timeout,
-            result_received_cb=self._process_rr_start
+            result_received_cb=self._process_rr_start,
         )
 
         self.log_info(fl_ctx, f"sending RR task {self.rr_task_name} to client {target_name}")
@@ -171,13 +173,47 @@ class RRController(Controller):
             return
 
         self.log_info(fl_ctx, f"started RR task {self.rr_task_name} on client {target_name}")
-
+        self.log_info(fl_ctx, "Waiting for clients to finish ...")
         while not abort_signal.triggered and not self.asked_to_stop:
             time.sleep(self.job_status_check_interval)
             self.log_info(fl_ctx, "checking job status ...")
             done = self._check_job_status(fl_ctx)
             if done:
                 break
+
+        self.log_info(fl_ctx, "Clients finished RR")
+
+        if self.submit_result_task_name:
+            # try to get the final result
+            if not self._final_result_client:
+                self.log_error(fl_ctx, "Final result not available")
+            else:
+                shareable = Shareable()
+                shareable.set_header(RRConstant.FINAL_RESULT, self._final_result_type)
+                task = Task(
+                    name=self.submit_result_task_name,
+                    data=shareable,
+                    timeout=self.submit_result_task_timeout,
+                    result_received_cb=self._process_final_result,
+                )
+
+                target_name = self._final_result_client
+                self.log_info(
+                    fl_ctx, f"sending task {self.submit_result_task_name} to client {target_name} for final result"
+                )
+
+                self.send_and_wait(
+                    task=task,
+                    targets=[target_name],
+                    fl_ctx=fl_ctx,
+                    abort_signal=abort_signal,
+                )
+
+                if task.completion_status != TaskCompletionStatus.OK:
+                    self.log_error(
+                        fl_ctx,
+                        f"failed to get final result from client {target_name}: {task.completion_status}",
+                    )
 
         self.log_info(fl_ctx, "RR Control Flow done!")
 
@@ -191,6 +227,19 @@ class RRController(Controller):
             reason = result.get(RRConstant.REASON, "?")
             self.log_error(fl_ctx, f"client {client_task.client.name} couldn't start RR: {reason}")
 
+    def _process_final_result(self, client_task: ClientTask, fl_ctx: FLContext):
+        result = client_task.result
+        assert isinstance(result, Shareable)
+        rc = result.get_return_code()
+        if rc == ReturnCode.OK:
+            self.log_info(fl_ctx, f"Got final result from client {client_task.client.name}")
+            if self.shareable_generator:
+                self._last_learnable = self.shareable_generator.shareable_to_learnable(result, fl_ctx)
+            else:
+                self._last_learnable = shareable_to_learnable(result)
+        else:
+            self.log_error(fl_ctx, f"client {client_task.client.name} couldn't submit final reason: {rc}")
+
     def _check_job_status(self, fl_ctx: FLContext):
         now = time.time()
         for client_name, cs in self.client_statuses.items():
@@ -199,11 +248,8 @@ class RRController(Controller):
             final_result = cs.status.final_result
             if final_result:
                 self.log_info(fl_ctx, f"got final result from client {client_name}")
-                assert isinstance(final_result, Shareable)
-                if self.shareable_generator:
-                    self._last_learnable = self.shareable_generator.shareable_to_learnable(final_result, fl_ctx)
-                else:
-                    self._last_learnable = shareable_to_learnable(final_result)
+                self._final_result_client = client_name
+                self._final_result_type = final_result
                 return True
 
             if now - cs.last_report_time > self.max_status_report_interval:
@@ -230,10 +276,7 @@ class RRController(Controller):
         assert isinstance(peer_ctx, FLContext)
         client_name = peer_ctx.get_identity_name()
         self.log_info(fl_ctx, f"got status report from client {client_name}")
-        self._update_client_status(
-            fl_ctx,
-            client_name=client_name,
-            result=request)
+        self._update_client_status(fl_ctx, client_name=client_name, result=request)
         return make_reply(ReturnCode.OK)
 
     def _process_failure(self, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
@@ -247,12 +290,12 @@ class RRController(Controller):
         return make_reply(ReturnCode.OK)
 
     def process_result_of_unknown_task(
-            self, client: Client, task_name: str, client_task_id: str, result: Shareable, fl_ctx: FLContext
+        self, client: Client, task_name: str, client_task_id: str, result: Shareable, fl_ctx: FLContext
     ):
         pass
 
     def stop_controller(self, fl_ctx: FLContext):
         if self._last_learnable:
             self.persistor.save(learnable=self._last_learnable, fl_ctx=fl_ctx)
-            self.log_info(fl_ctx, "Final result saved!")
+            self.log_info(fl_ctx, f"Final result saved: {self._last_learnable}")
         self.log_debug(fl_ctx, "controller stopped")

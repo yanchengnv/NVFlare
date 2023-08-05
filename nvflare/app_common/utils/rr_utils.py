@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from nvflare.apis.shareable import Shareable, ReservedHeaderKey
+from nvflare.apis.shareable import ReservedHeaderKey, Shareable
 from nvflare.app_common.abstract.learnable import Learnable
 
 
@@ -24,7 +24,8 @@ class RROrder:
 
 class RRConstant:
 
-    TASK_NAME = "rr"
+    TASK_NAME_RR = "rr"
+    TASK_NAME_SUBMIT_RESULT = "submit_result"
     ORDER = "order"
     CLIENTS = "clients"
     NUM_ROUNDS = "num_rounds"
@@ -40,7 +41,6 @@ class RRConstant:
 
 
 class StatusReport:
-
     def __init__(self, last_round=0, start_time=None, end_time=None, final_result=None):
         self.last_round = last_round
         self.start_time = start_time

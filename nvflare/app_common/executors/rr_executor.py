@@ -11,294 +11,141 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import threading
-import time
 import random
+import time
 
-from nvflare.apis.event_type import EventType
-from nvflare.apis.executor import Executor
-from nvflare.apis.fl_constant import FLContextKey, ReturnCode
+from nvflare.apis.fl_constant import ReturnCode
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import Shareable, make_reply
 from nvflare.apis.signal import Signal
 from nvflare.app_common.app_constant import AppConstants
-from nvflare.app_common.utils.cw_utils import (
-    Constant,
-    StatusReport,
-    execution_failure,
-    RROrder,
-    rotate_to_front
-)
+from nvflare.app_common.utils.cw_utils import Constant, RROrder, StatusReport, rotate_to_front
+
+from .cwe import ClientWorkflowExecutor
 
 
-class _LearnTask:
-    def __init__(self, task_name: str, task_data: Shareable, fl_ctx: FLContext):
-        self.task_name = task_name
-        self.task_data = task_data
-        self.fl_ctx = fl_ctx
-        self.abort_signal = Signal()
-
-
-class RRExecutor(Executor):
+class RRExecutor(ClientWorkflowExecutor):
     def __init__(
         self,
         start_task_name=Constant.TASK_NAME_START,
+        configure_task_name=Constant.TASK_NAME_CONFIGURE,
         submit_result_task_name=Constant.TASK_NAME_SUBMIT_RESULT,
         train_task_name=AppConstants.TASK_TRAIN,
         max_status_report_interval: float = 600.0,
         task_check_interval: float = 1.0,
+        task_abort_timeout: float = 5.0,
     ):
-        super().__init__()
-        self.start_task_name = start_task_name
-        self.submit_result_task_name = submit_result_task_name
-        self.train_task_name = train_task_name
-        self.rr_order = RROrder.FIXED
+        super().__init__(
+            start_task_name=start_task_name,
+            configure_task_name=configure_task_name,
+            submit_result_task_name=submit_result_task_name,
+            train_task_name=train_task_name,
+            max_status_report_interval=max_status_report_interval,
+            task_check_interval=task_check_interval,
+            task_abort_timeout=task_abort_timeout,
+            allow_busy_task=False,
+        )
 
-        self.max_status_report_interval = max_status_report_interval
-        self.status_check_interval = 1.0  # for internal check
-        self.status_report_thread = threading.Thread(target=self._check_status)
-        self.status_report_thread.daemon = True
-        self.current_status = StatusReport()
-        self.learn_error = None
-        self.last_status_report_time = time.time()  # time of last status report to server
-        self.status_change_time = 0  # time of last status change
-
-        self.learn_thread = threading.Thread(target=self._do_learn)
-        self.learn_thread.daemon = True
-        self.task_check_interval = task_check_interval
-        self.learn_task = None
-        self.current_task = None
-        self.learn_executor = None
-        self.learn_lock = threading.Lock()
-        self.asked_to_stop = False
-        self.status_lock = threading.Lock()
-        self.engine = None
-        self.me = None
-        self.is_starting_client = False
-        self.last_result = None
-
-    def handle_event(self, event_type: str, fl_ctx: FLContext):
-        if event_type == EventType.START_RUN:
-            self.engine = fl_ctx.get_engine()
-            if not self.engine:
-                self.system_panic("no engine", fl_ctx)
-                return
-
-            runner = fl_ctx.get_prop(FLContextKey.RUNNER)
-            if not runner:
-                self.system_panic("no client runner", fl_ctx)
-                return
-
-            self.me = fl_ctx.get_identity_name()
-            self.learn_executor = runner.task_table.get(self.train_task_name)
-            if not self.learn_executor:
-                self.system_panic(f"no executor for task {self.train_task_name}", fl_ctx)
-                return
-
-            self.engine.register_aux_message_handler(
-                topic=Constant.TOPIC_LEARN, message_handle_func=self._process_learn_request
-            )
-
-            self.log_info(fl_ctx, "Started learn thread")
-            self.learn_thread.start()
-            self.status_report_thread.start()
-        elif event_type in [EventType.ABORT_TASK, EventType.END_RUN]:
-            self.asked_to_stop = True
-            task = self.learn_task
-            if task:
-                task.abort_signal.trigger(True)
-
-    def execute(self, task_name: str, shareable: Shareable, fl_ctx: FLContext, abort_signal: Signal) -> Shareable:
-        if task_name == self.start_task_name:
-            return self._start_rr(shareable, fl_ctx)
-        elif task_name == self.submit_result_task_name:
-            self.log_info(fl_ctx, "Submitting my result")
-            if not self.last_result:
-                self.log_error(fl_ctx, "got request to submit result but I have no result to submit!")
-                return make_reply(ReturnCode.BAD_REQUEST_DATA)
-            return self.last_result
-        else:
-            self.log_error(fl_ctx, f"Could not handle task: {task_name}")
-            return make_reply(ReturnCode.TASK_UNKNOWN)
-
-    def _check_status(self):
-        while not self.asked_to_stop:
-            must_report = False
-            now = time.time()
-            if self.status_change_time > self.last_status_report_time:
-                # status has changed since last reported:
-                must_report = True
-            elif now - self.last_status_report_time > self.max_status_report_interval:
-                # too long after last report time. report again even if no status change to keep alive
-                must_report = True
-
-            if must_report:
-                # do status report
-                with self.engine.new_context() as fl_ctx:
-                    if self.learn_error:
-                        # report error!
-                        request = execution_failure(self.learn_error)
-                        topic = Constant.TOPIC_FAILURE
-                    else:
-                        request = self.current_status.to_shareable()
-                        topic = Constant.TOPIC_REPORT_STATUS
-
-                    self.log_info(fl_ctx, f"send status report: {request}")
-                    resp = self.engine.send_aux_request(
-                        targets=[], topic=topic, request=request, timeout=2.0, fl_ctx=fl_ctx
-                    )
-                    reply = resp.get("server")
-                    if reply and isinstance(reply, Shareable) and reply.get_return_code() == ReturnCode.OK:
-                        self.last_status_report_time = now
-            time.sleep(self.status_check_interval)
-
-    def _start_rr(self, shareable: Shareable, fl_ctx: FLContext):
-        self.is_starting_client = True
-        self.rr_order = shareable.get_header(Constant.ORDER, RROrder.FIXED)
-        clients = shareable.get_header(Constant.CLIENTS)
-        self.log_info(fl_ctx, f"Starting RR on clients {clients} with Order {self.rr_order} ")
+    def start_workflow(self, shareable: Shareable, fl_ctx: FLContext, abort_signal: Signal) -> Shareable:
+        clients = self.get_config_prop(Constant.CLIENTS)
+        rr_order = self.get_config_prop(Constant.ORDER)
+        self.log_info(fl_ctx, f"Starting RR Workflow on clients {clients} with Order {rr_order} ")
         shareable.set_header(AppConstants.CURRENT_ROUND, 1)
-        self.learn_task = _LearnTask(task_name=self.train_task_name, task_data=shareable, fl_ctx=fl_ctx)
+        shareable.set_header(Constant.CLIENT_ORDER, clients)
+        self.set_learn_task(task_name=self.train_task_name, task_data=shareable, fl_ctx=fl_ctx)
         return make_reply(ReturnCode.OK)
 
-    def _do_learn(self):
-        while not self.asked_to_stop:
-            if self.learn_task:
-                self.logger.info("Got a Learn task")
-                self._do_task(self.learn_task)
-                self.learn_task = None
-            time.sleep(self.task_check_interval)
-
-    def _do_task(self, task: _LearnTask):
-        task_data = task.task_data
-        if not isinstance(task_data, Shareable):
-            raise ValueError(f"task data must be Shareable but got {type(task_data)}")
-
-        fl_ctx = task.fl_ctx
-        assert isinstance(fl_ctx, FLContext)
-
+    def do_learn_task(self, name: str, data: Shareable, fl_ctx: FLContext, abort_signal: Signal):
         # set status report of starting task
-        current_round = task_data.get_header(AppConstants.CURRENT_ROUND)
+        current_round = data.get_header(AppConstants.CURRENT_ROUND)
         start_time = time.time()
-        self.current_status = StatusReport(last_round=current_round, start_time=start_time)
-        self.status_change_time = start_time
+        self.update_status(StatusReport(last_round=current_round, start_time=start_time), start_time)
 
         # execute the task
-        self.log_info(fl_ctx, f"executing round {current_round}")
-        result = self.learn_executor.execute(task.task_name, task_data, fl_ctx, task.abort_signal)
-        self.log_info(fl_ctx, f"finished round {current_round}")
+        result = self.execute_train(data, fl_ctx, abort_signal)
 
-        assert isinstance(result, Shareable)
         rc = result.get_return_code(ReturnCode.OK)
         if rc != ReturnCode.OK:
             self.log_error(fl_ctx, f"learn executor failed: {rc}")
-            self._set_learn_error(rc)
+            self.set_error(rc)
             return
 
         self.last_result = result
 
         # see whether we need to send to next leg
         end_time = time.time()
-        num_rounds = task_data.get_header(AppConstants.NUM_ROUNDS)
-        current_round = task_data.get_header(AppConstants.CURRENT_ROUND)
-        clients = task_data.get_header(Constant.CLIENTS)
-        self.log_info(fl_ctx, f"RR CLIENTS: {clients}")
+        num_rounds = data.get_header(AppConstants.NUM_ROUNDS)
+        current_round = data.get_header(AppConstants.CURRENT_ROUND)
+        client_order = data.get_header(Constant.CLIENT_ORDER)
 
         result.set_header(AppConstants.NUM_ROUNDS, num_rounds)
         result.set_header(AppConstants.CURRENT_ROUND, current_round)
-        result.set_header(Constant.CLIENTS, clients)
+        result.set_header(Constant.CLIENT_ORDER, client_order)
 
         all_done = False
-        assert isinstance(clients, list)
-        my_idx = clients.index(self.me)
+        assert isinstance(client_order, list)
+        my_idx = client_order.index(self.me)
         if current_round == num_rounds:
             # am I the last leg?
-            if my_idx == len(clients) - 1:
+            if my_idx == len(client_order) - 1:
                 # I'm the last leg - the RR is done!
                 self.log_info(fl_ctx, "I'm the last leg - got final result")
                 all_done = True
 
         # update status
-        self.current_status = StatusReport(
-            last_round=current_round,
-            start_time=start_time,
-            end_time=end_time,
-            all_done=all_done,
+        self.update_status(
+            status=StatusReport(
+                last_round=current_round,
+                start_time=start_time,
+                end_time=end_time,
+                all_done=all_done,
+            ),
+            timestamp=end_time,
         )
-        self.status_change_time = end_time
 
         if all_done:
             return
 
         # send to next leg
-        if my_idx < len(clients) - 1:
-            next_client = clients[my_idx + 1]
+        if my_idx < len(client_order) - 1:
+            next_client = client_order[my_idx + 1]
         else:
-            next_client = clients[0]
+            next_client = client_order[0]
 
-        resp = self.engine.send_aux_request(
-            targets=[next_client], topic=Constant.TOPIC_LEARN, request=result, timeout=2.0, fl_ctx=fl_ctx
+        sent = self.send_learn_task(
+            targets=[next_client],
+            request=result,
+            timeout=2.0,
+            fl_ctx=fl_ctx,
         )
+        if sent:
+            self.log_info(fl_ctx, f"sent learn request to next client {next_client}")
 
-        assert isinstance(resp, dict)
-        reply = resp.get(next_client)
-        if not isinstance(reply, Shareable):
-            self.log_error(fl_ctx, f"failed to send learn request to next client {next_client}")
-            self.log_error(fl_ctx, f"reply must be Shareable but got {type(reply)}")
-            self._set_learn_error(ReturnCode.EXECUTION_EXCEPTION)
-            return
-
-        rc = reply.get_return_code(ReturnCode.OK)
-        if rc != ReturnCode.OK:
-            self.log_error(fl_ctx, f"failed to send learn request to next client {next_client}: {rc}")
-            self._set_learn_error(rc)
-            return
-
-        self.log_info(fl_ctx, f"sent learn request to next client {next_client}")
-
-    def _set_learn_error(self, err: str):
-        self.learn_error = err
-        self.status_change_time = time.time()
-
-    def _process_learn_request(self, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
+    def prepare_learn_task(self, data: Shareable, fl_ctx: FLContext):
         peer_ctx = fl_ctx.get_peer_context()
         assert isinstance(peer_ctx, FLContext)
-        sender = peer_ctx.get_identity_name()
-
-        # process request from prev client
-        self.log_info(fl_ctx, f"got Learn request from {sender}")
-
-        if self.learn_task:
-            # should never happen!
-            self.log_error(fl_ctx, f"got Learn request from {sender} while I'm still busy!")
-            self._set_learn_error(ReturnCode.EXECUTION_EXCEPTION)
-            return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
         # Am I the starting client?
         if self.is_starting_client:
             # need to start the next round
-            current_round = request.get_header(AppConstants.CURRENT_ROUND)
-            num_rounds = request.get_header(AppConstants.NUM_ROUNDS)
+            current_round = data.get_header(AppConstants.CURRENT_ROUND)
+            num_rounds = data.get_header(AppConstants.NUM_ROUNDS)
             if current_round >= num_rounds:
                 # should never happen!
                 self.log_error(
                     fl_ctx,
                     f"logic error: current round {current_round} >= num rounds {num_rounds} for starting client!",
                 )
-                self._set_learn_error(ReturnCode.EXECUTION_EXCEPTION)
-                return make_reply(ReturnCode.EXECUTION_EXCEPTION)
+                raise RuntimeError("logic error")
 
             # start next round
             next_round = current_round + 1
-            clients = request.get_header(Constant.CLIENTS)
-            if self.rr_order == RROrder.RANDOM:
+            clients = self.get_config_prop(Constant.CLIENTS)
+            rr_order = self.get_config_prop(Constant.ORDER)
+            if rr_order == RROrder.RANDOM:
                 random.shuffle(clients)
                 rotate_to_front(self.me, clients)
-                request.set_header(Constant.CLIENTS, clients)
+                data.set_header(Constant.CLIENT_ORDER, clients)
 
             self.log_info(fl_ctx, f"Starting new round {next_round} on clients: {clients}")
-            request.set_header(AppConstants.CURRENT_ROUND, next_round)
-
-        self.log_info(fl_ctx, f"accepted learn request from {sender}")
-        self.learn_task = _LearnTask(task_name=self.train_task_name, task_data=request, fl_ctx=fl_ctx)
-        return make_reply(ReturnCode.OK)
+            data.set_header(AppConstants.CURRENT_ROUND, next_round)

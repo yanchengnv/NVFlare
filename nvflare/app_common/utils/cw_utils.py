@@ -18,21 +18,30 @@ from nvflare.app_common.abstract.learnable import Learnable
 
 class Constant:
 
+    TASK_NAME_CONFIGURE = "configure"
     TASK_NAME_START = "start"
     TASK_NAME_SUBMIT_RESULT = "submit_result"
-    ORDER = "order"
-    CLIENTS = "clients"
-    TASK_DATA = "task_data"
-    LAST_ROUND = "last_round"
-    ROUND_START_TIME = "round_start_time"
-    ROUND_END_TIME = "round_end_time"
-    LAST_RESULT = "last_result"
-    RESULT_TYPE = "result_type"
-    ALL_DONE = "all_done"
-    REASON = "reason"
+
+    ORDER = "cw.order"
+    CLIENTS = "cw.clients"
+    CLIENT_ORDER = "cw.client_order"
+    LAST_ROUND = "cw.last_round"
+    START_TIME = "cw.start_time"
+    END_TIME = "cw.end_time"
+    LAST_RESULT = "cw.last_result"
+    RESULT_TYPE = "cw.result_type"
+    ALL_DONE = "cw.all_done"
+    REASON = "cw.reason"
+    AGGR_CLIENTS = "cw.aggr_clients"
+    TRAIN_CLIENTS = "cw.train_clients"
+    AGGREGATOR = "cw.aggr"
+    BEST_METRIC = "cw.best_metric"
+    CONFIG = "cw.config"
+
     TOPIC_REPORT_STATUS = "cw.report_status"
     TOPIC_FAILURE = "cw.failure"
     TOPIC_LEARN = "cw.learn"
+    TOPIC_RESULT = "cw.result"
 
 
 class RROrder:
@@ -42,11 +51,11 @@ class RROrder:
 
 
 class StatusReport:
-    def __init__(self, last_round=0, start_time=None, end_time=None, last_result=None, all_done=False):
+    def __init__(self, last_round=0, start_time=None, end_time=None, best_metric=None, all_done=False):
         self.last_round = last_round
         self.start_time = start_time
         self.end_time = end_time
-        self.last_result = last_result
+        self.best_metric = best_metric
         self.all_done = all_done
 
     def to_shareable(self) -> Shareable:
@@ -55,11 +64,11 @@ class StatusReport:
         result[Constant.ALL_DONE] = self.all_done
 
         if self.start_time:
-            result[Constant.ROUND_START_TIME] = self.start_time
+            result[Constant.START_TIME] = self.start_time
         if self.end_time:
-            result[Constant.ROUND_END_TIME] = self.end_time
-        if self.last_result:
-            result[Constant.LAST_RESULT] = self.last_result
+            result[Constant.END_TIME] = self.end_time
+        if self.best_metric:
+            result[Constant.BEST_METRIC] = self.best_metric
         return result
 
     def __eq__(self, other):
@@ -67,28 +76,26 @@ class StatusReport:
             # don't attempt to compare against unrelated types
             return ValueError(f"cannot compare to object of type {type(other)}")
 
-        return self.last_round == other.last_round and \
-            self.start_time == other.start_time and \
-            self.end_time == other.end_time and \
-            self.all_done == other.all_done and \
-            self.last_result == other.last_result
+        return (
+            self.last_round == other.last_round
+            and self.start_time == other.start_time
+            and self.end_time == other.end_time
+            and self.all_done == other.all_done
+            and self.best_metric == other.best_metric
+        )
 
 
 def status_report_from_shareable(d: Shareable) -> StatusReport:
     last_round = d.get(Constant.LAST_ROUND)
     if last_round is None:
         raise ValueError(f"missing {Constant.LAST_ROUND} in status report")
-    start_time = d.get(Constant.ROUND_START_TIME)
-    end_time = d.get(Constant.ROUND_END_TIME)
+    start_time = d.get(Constant.START_TIME)
+    end_time = d.get(Constant.END_TIME)
     all_done = d.get(Constant.ALL_DONE)
-    last_result = d.get(Constant.LAST_RESULT)
+    best_metric = d.get(Constant.BEST_METRIC)
 
     return StatusReport(
-        last_round=last_round,
-        start_time=start_time,
-        end_time=end_time,
-        last_result=last_result,
-        all_done=all_done
+        last_round=last_round, start_time=start_time, end_time=end_time, best_metric=best_metric, all_done=all_done
     )
 
 

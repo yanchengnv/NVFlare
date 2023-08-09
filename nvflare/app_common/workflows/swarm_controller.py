@@ -13,13 +13,12 @@
 # limitations under the License.
 
 from nvflare.apis.fl_context import FLContext
-from nvflare.apis.shareable import Shareable
-from nvflare.app_common.utils.cw_utils import Constant, RROrder, StatusReport
+from nvflare.app_common.utils.cw_utils import Constant
 
-from .cwc import ClientStatus, ClientWorkflowController
+from .cwc import ClientWorkflowController
 
 
-class RRController(ClientWorkflowController):
+class SwarmController(ClientWorkflowController):
     def __init__(
         self,
         num_rounds: int,
@@ -36,7 +35,8 @@ class RRController(ClientWorkflowController):
         participating_clients=None,
         starting_client: str = None,
         max_status_report_interval: float = 3600.0,
-        rr_order: str = RROrder.FIXED,
+        aggr_clients=None,
+        train_clients=None,
     ):
         ClientWorkflowController.__init__(
             self,
@@ -55,30 +55,24 @@ class RRController(ClientWorkflowController):
             starting_client=starting_client,
             max_status_report_interval=max_status_report_interval,
         )
-        self.rr_order = rr_order
+        self.aggr_clients = aggr_clients
+        self.train_clients = train_clients
+
+    def start_controller(self, fl_ctx: FLContext):
+        super().start_controller(fl_ctx)
+        if not self.train_clients:
+            self.train_clients = []
+        else:
+            for c in self.train_clients:
+                if c not in self.participating_clients:
+                    raise RuntimeError(f"train client {c} is not in participating_clients")
+
+        if not self.aggr_clients:
+            self.aggr_clients = []
+        else:
+            for c in self.aggr_clients:
+                if c not in self.participating_clients:
+                    raise RuntimeError(f"aggr client {c} is not in participating_clients")
 
     def prepare_config(self):
-        return {Constant.ORDER: self.rr_order}
-
-    def select_final_result(self, fl_ctx: FLContext) -> (str, Shareable):
-        best_client = None
-        last_progress_time = 0
-        for c, cs in self.client_statuses.items():
-            assert isinstance(cs, ClientStatus)
-            if cs.last_progress_time and cs.last_progress_time > last_progress_time:
-                best_client = c
-                last_progress_time = cs.last_progress_time
-
-            s = cs.status
-            if s:
-                assert isinstance(s, StatusReport)
-                if s.all_done:
-                    best_client = c
-                    break
-
-        if not best_client:
-            self.log_error(fl_ctx, "cannot select final result: no client has result")
-            return "", None
-        shareable = Shareable()
-        shareable.set_header(Constant.RESULT_TYPE, "last")
-        return best_client, shareable
+        return {Constant.AGGR_CLIENTS: self.aggr_clients, Constant.TRAIN_CLIENTS: self.train_clients}

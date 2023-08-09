@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import os
+import random
 import time
 
 import numpy as np
@@ -124,7 +125,15 @@ class NPTrainer(Executor):
             return make_reply(ReturnCode.TASK_ABORTED)
 
         # Prepare a DXO for our updated model. Create shareable and return
-        outgoing_dxo = DXO(data_kind=incoming_dxo.data_kind, data=np_data, meta={MetaKey.NUM_STEPS_CURRENT_ROUND: 1})
+        fake_metric = random.uniform(0.1, 1.0)
+        outgoing_dxo = DXO(
+            data_kind=incoming_dxo.data_kind,
+            data=np_data,
+            meta={
+                MetaKey.NUM_STEPS_CURRENT_ROUND: 1,
+                MetaKey.INITIAL_METRICS: fake_metric,
+            },
+        )
         return outgoing_dxo.to_shareable()
 
     def _submit_model(self, fl_ctx: FLContext, abort_signal: Signal):

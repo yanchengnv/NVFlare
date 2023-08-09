@@ -24,7 +24,7 @@ from nvflare.app_common.app_event_type import AppEventType
 from nvflare.widgets.widget import Widget
 
 
-class IntimeModelSelector(Widget):
+class SimpleIntimeModelSelector(Widget):
     def __init__(
         self, weigh_by_local_iter=False, aggregation_weights=None, validation_metric_name=MetaKey.INITIAL_METRICS
     ):
@@ -64,7 +64,7 @@ class IntimeModelSelector(Widget):
 
     def _before_accept(self, fl_ctx: FLContext):
         peer_ctx = fl_ctx.get_peer_context()
-        shareable: Shareable = peer_ctx.get_prop(FLContextKey.SHAREABLE)
+        shareable: Shareable = fl_ctx.get_prop(AppConstants.TRAINING_RESULT)
         try:
             dxo = from_shareable(shareable)
         except:
@@ -132,9 +132,3 @@ class IntimeModelSelector(Widget):
 
         self._reset_stats()
         return True
-
-
-class IntimeModelSelectionHandler(IntimeModelSelector):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.logger.warning("'IntimeModelSelectionHandler' was renamed to 'IntimeModelSelector'")

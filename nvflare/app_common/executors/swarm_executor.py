@@ -216,6 +216,7 @@ class SwarmExecutor(ClientWorkflowExecutor):
         self.aggregator = None
         self.shareable_gen = None
         self.gatherer = None
+        self.gatherer_waiter = threading.Event()
         self.trainers = None
         self.aggrs = None
         self.is_trainer = False
@@ -312,12 +313,13 @@ class SwarmExecutor(ClientWorkflowExecutor):
             if gatherer:
                 assert isinstance(gatherer, Gatherer)
                 if gatherer.is_done():
+                    self.gatherer = None
+                    self.gatherer_waiter.clear()
                     gatherer.cancel()
                     try:
                         self._end_gather(gatherer)
                     except:
                         self.logger.error(f"exception ending gatherer: {secure_format_traceback()}")
-                    self.gatherer = None
             time.sleep(0.2)
 
     def _end_gather(self, gatherer: Gatherer):
@@ -357,24 +359,20 @@ class SwarmExecutor(ClientWorkflowExecutor):
             current_round = request.get_header(AppConstants.CURRENT_ROUND)
             self.log_info(fl_ctx, f"got training result from {client_name} for round {current_round}")
 
-            if not self.gatherer:
+            gatherer = self.gatherer
+            if not gatherer:
                 # got this from a fast client before I even create the waiter.
                 # wait until the gatherer is set up.
                 self.log_info(fl_ctx, f"got result from {client_name} for round {current_round} before gatherer setup")
-                wait_start = time.time()
-                while not self.gatherer:
-                    time.sleep(0.1)
-                    if time.time() - wait_start > self.task_abort_timeout:
-                        break
-                if not self.gatherer:
-                    self.log_error(fl_ctx, f"Still no gatherer after {self.task_abort_timeout} seconds")
-                    self.log_error(
-                        fl_ctx, f"Ignored result from {client_name} for round {current_round} since no gatherer"
-                    )
-                    self.set_error(ReturnCode.EXECUTION_EXCEPTION)
-                    return make_reply(ReturnCode.EXECUTION_EXCEPTION)
+                self.gatherer_waiter.wait(self.task_abort_timeout)
 
             gatherer = self.gatherer
+            if not gatherer:
+                self.log_error(fl_ctx, f"Still no gatherer after {self.task_abort_timeout} seconds")
+                self.log_error(fl_ctx, f"Ignored result from {client_name} for round {current_round} since no gatherer")
+                self.set_error(ReturnCode.EXECUTION_EXCEPTION)
+                return make_reply(ReturnCode.EXECUTION_EXCEPTION)
+
             assert isinstance(gatherer, Gatherer)
             if gatherer.for_round != current_round:
                 self.log_warning(
@@ -410,14 +408,13 @@ class SwarmExecutor(ClientWorkflowExecutor):
             # set up the aggr waiter
             gatherer = self.gatherer
             if gatherer:
-                # already waiting for aggregation?
-                assert isinstance(gatherer, Gatherer)
-                self.log_warning(fl_ctx, f"cancelling unfinished gatherer for round {gatherer.for_round}")
-                gatherer.cancel()
-
-            # wait for waiter to be cleared
-            while self.gatherer:
-                time.sleep(0.1)
+                # already waiting for aggregation - should never happen
+                self.log_error(
+                    fl_ctx,
+                    f"logic error: got task for round {current_round} while gathering for round {gatherer.for_round}",
+                )
+                self.set_error(ReturnCode.EXECUTION_EXCEPTION)
+                return
 
             self.log_info(fl_ctx, f"setting up the gatherer for round {current_round}")
             self.gatherer = Gatherer(
@@ -431,6 +428,7 @@ class SwarmExecutor(ClientWorkflowExecutor):
                 aggregator=self.aggregator,
                 executor=self,
             )
+            self.gatherer_waiter.set()
 
         # execute the task
         if self.is_trainer:

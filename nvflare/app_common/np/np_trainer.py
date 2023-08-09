@@ -134,6 +134,10 @@ class NPTrainer(Executor):
                 MetaKey.INITIAL_METRICS: fake_metric,
             },
         )
+
+        # artificial delay
+        time.sleep(random.uniform(1.0, 5.0))
+
         return outgoing_dxo.to_shareable()
 
     def _submit_model(self, fl_ctx: FLContext, abort_signal: Signal):

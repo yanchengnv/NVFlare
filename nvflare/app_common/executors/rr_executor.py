@@ -30,29 +30,31 @@ class RRExecutor(ClientWorkflowExecutor):
         start_task_name=Constant.TASK_NAME_START,
         configure_task_name=Constant.TASK_NAME_CONFIGURE,
         submit_result_task_name=Constant.TASK_NAME_SUBMIT_RESULT,
-        train_task_name=AppConstants.TASK_TRAIN,
+        learn_task_name=AppConstants.TASK_TRAIN,
         max_status_report_interval: float = 600.0,
-        task_check_interval: float = 1.0,
-        task_abort_timeout: float = 5.0,
+        learn_task_check_interval: float = 0.5,
+        learn_task_abort_timeout: float = 5.0,
     ):
         super().__init__(
             start_task_name=start_task_name,
             configure_task_name=configure_task_name,
             submit_result_task_name=submit_result_task_name,
-            train_task_name=train_task_name,
+            learn_task_name=learn_task_name,
             max_status_report_interval=max_status_report_interval,
-            task_check_interval=task_check_interval,
-            task_abort_timeout=task_abort_timeout,
+            learn_task_check_interval=learn_task_check_interval,
+            learn_task_abort_timeout=learn_task_abort_timeout,
             allow_busy_task=False,
         )
 
     def start_workflow(self, shareable: Shareable, fl_ctx: FLContext, abort_signal: Signal) -> Shareable:
         clients = self.get_config_prop(Constant.CLIENTS)
+        # make sure the starting client is the 1st
+        rotate_to_front(self.me, clients)
         rr_order = self.get_config_prop(Constant.ORDER)
-        self.log_info(fl_ctx, f"Starting RR Workflow on clients {clients} with Order {rr_order} ")
-        shareable.set_header(AppConstants.CURRENT_ROUND, 1)
+        self.log_info(fl_ctx, f"Starting Round-Robin workflow on clients {clients} with Order {rr_order} ")
+        shareable.set_header(AppConstants.CURRENT_ROUND, self.get_config_prop(Constant.START_ROUND, 0))
         shareable.set_header(Constant.CLIENT_ORDER, clients)
-        self.set_learn_task(task_name=self.train_task_name, task_data=shareable, fl_ctx=fl_ctx)
+        self.set_learn_task(task_data=shareable, fl_ctx=fl_ctx)
         return make_reply(ReturnCode.OK)
 
     def do_learn_task(self, name: str, data: Shareable, fl_ctx: FLContext, abort_signal: Signal):
@@ -85,12 +87,29 @@ class RRExecutor(ClientWorkflowExecutor):
         all_done = False
         assert isinstance(client_order, list)
         my_idx = client_order.index(self.me)
-        if current_round == num_rounds:
-            # am I the last leg?
-            if my_idx == len(client_order) - 1:
-                # I'm the last leg - the RR is done!
-                self.log_info(fl_ctx, "I'm the last leg - got final result")
+
+        if my_idx == len(client_order) - 1:
+            # I'm the last leg
+            num_rounds_done = current_round - self.get_config_prop(Constant.START_ROUND, 0) + 1
+            if num_rounds_done >= num_rounds:
+                # The RR is done!
+                self.log_info(fl_ctx, f"Round Robin Done: number of rounds completed {num_rounds_done}")
                 all_done = True
+            else:
+                # decide the next round order
+                rr_order = self.get_config_prop(Constant.ORDER)
+                if rr_order == RROrder.RANDOM:
+                    random.shuffle(client_order)
+                    # make sure I'm not the first in the new order
+                    if client_order[0] == self.me:
+                        # put me at the end
+                        client_order.pop(0)
+                        client_order.append(self.me)
+                    result.set_header(Constant.CLIENT_ORDER, client_order)
+
+                next_round = current_round + 1
+                result.set_header(AppConstants.CURRENT_ROUND, next_round)
+                self.log_info(fl_ctx, f"Starting new round {next_round} on clients: {client_order}")
 
         # update status
         self.update_status(
@@ -115,37 +134,7 @@ class RRExecutor(ClientWorkflowExecutor):
         sent = self.send_learn_task(
             targets=[next_client],
             request=result,
-            timeout=2.0,
             fl_ctx=fl_ctx,
         )
         if sent:
             self.log_info(fl_ctx, f"sent learn request to next client {next_client}")
-
-    def prepare_learn_task(self, data: Shareable, fl_ctx: FLContext):
-        peer_ctx = fl_ctx.get_peer_context()
-        assert isinstance(peer_ctx, FLContext)
-
-        # Am I the starting client?
-        if self.is_starting_client:
-            # need to start the next round
-            current_round = data.get_header(AppConstants.CURRENT_ROUND)
-            num_rounds = data.get_header(AppConstants.NUM_ROUNDS)
-            if current_round >= num_rounds:
-                # should never happen!
-                self.log_error(
-                    fl_ctx,
-                    f"logic error: current round {current_round} >= num rounds {num_rounds} for starting client!",
-                )
-                raise RuntimeError("logic error")
-
-            # start next round
-            next_round = current_round + 1
-            clients = self.get_config_prop(Constant.CLIENTS)
-            rr_order = self.get_config_prop(Constant.ORDER)
-            if rr_order == RROrder.RANDOM:
-                random.shuffle(clients)
-                rotate_to_front(self.me, clients)
-                data.set_header(Constant.CLIENT_ORDER, clients)
-
-            self.log_info(fl_ctx, f"Starting new round {next_round} on clients: {clients}")
-            data.set_header(AppConstants.CURRENT_ROUND, next_round)

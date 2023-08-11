@@ -59,6 +59,8 @@ class AppEventType(object):
     TRAINING_STARTED = "_training_started"
     TRAINING_FINISHED = "_training_finished"
     TRAIN_DONE = "_train_done"
+    EXECUTOR_INITIALIZED = "_executor_initialized"
+    EXECUTOR_FINALIZED = "_executor_finalized"
 
     CROSS_VAL_INIT = "_cross_val_init"
     VALIDATION_RESULT_RECEIVED = "_validation_result_received"

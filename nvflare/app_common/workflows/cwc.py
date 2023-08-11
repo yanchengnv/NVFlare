@@ -29,7 +29,6 @@ from nvflare.app_common.utils.cw_utils import (
     Constant,
     StatusReport,
     learnable_to_shareable,
-    rotate_to_front,
     shareable_to_learnable,
     status_report_from_shareable,
 )
@@ -48,6 +47,7 @@ class ClientWorkflowController(Controller):
     def __init__(
         self,
         num_rounds: int,
+        start_round: int = 0,
         persistor_id="persistor",
         shareable_generator_id="shareable_generator",
         configure_task_name=Constant.TASK_NAME_CONFIGURE,
@@ -74,6 +74,7 @@ class ClientWorkflowController(Controller):
         self.persistor_id = persistor_id
         self.shareable_generator_id = shareable_generator_id
         self.num_rounds = num_rounds
+        self.start_round = start_round
         self.max_status_report_interval = max_status_report_interval
         self.client_ready_timeout = client_ready_timeout
         self.progress_timeout = progress_timeout
@@ -134,10 +135,6 @@ class ClientWorkflowController(Controller):
         for c in self.participating_clients:
             self.client_statuses[c] = ClientStatus()
 
-        # make sure the starting client is the 1st
-        rotate_to_front(self.starting_client, self.participating_clients)
-        self.log_info(fl_ctx, f"Ordered participating clients: {self.participating_clients}")
-
         self._engine.register_aux_message_handler(
             topic=Constant.TOPIC_REPORT_STATUS, message_handle_func=self._process_status_report
         )
@@ -145,14 +142,6 @@ class ClientWorkflowController(Controller):
         self._engine.register_aux_message_handler(
             topic=Constant.TOPIC_FAILURE, message_handle_func=self._process_failure
         )
-
-    def process_task_request(self, client: Client, fl_ctx: FLContext):
-        cs = self.client_statuses.get(client.name)
-        if cs:
-            assert isinstance(cs, ClientStatus)
-            if not cs.ready_time:
-                cs.ready_time = time.time()
-        return super().process_task_request(client, fl_ctx)
 
     @abstractmethod
     def prepare_config(self) -> dict:
@@ -172,6 +161,7 @@ class ClientWorkflowController(Controller):
         learn_config = {
             Constant.CLIENTS: self.participating_clients,
             AppConstants.NUM_ROUNDS: self.num_rounds,
+            Constant.START_ROUND: self.start_round,
         }
 
         extra_config = self.prepare_config()
@@ -436,5 +426,4 @@ class ClientWorkflowController(Controller):
     def stop_controller(self, fl_ctx: FLContext):
         if self._last_learnable:
             self.persistor.save(learnable=self._last_learnable, fl_ctx=fl_ctx)
-            self.log_info(fl_ctx, f"Final result saved: {self._last_learnable}")
         self.log_debug(fl_ctx, "controller stopped")

@@ -22,6 +22,7 @@ from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import Shareable, make_reply
 from nvflare.apis.signal import Signal
 from nvflare.app_common.app_constant import AppConstants
+from nvflare.app_common.app_event_type import AppEventType
 from nvflare.app_common.utils.cw_utils import Constant, StatusReport, execution_failure
 from nvflare.security.logging import secure_format_traceback
 
@@ -40,20 +41,39 @@ class ClientWorkflowExecutor(Executor):
         start_task_name=Constant.TASK_NAME_START,
         configure_task_name=Constant.TASK_NAME_START,
         submit_result_task_name=Constant.TASK_NAME_SUBMIT_RESULT,
-        train_task_name=AppConstants.TASK_TRAIN,
+        learn_task_name=AppConstants.TASK_TRAIN,
         max_status_report_interval: float = 600.0,
-        task_check_interval: float = 1.0,
-        task_abort_timeout: float = 5.0,
+        learn_task_check_interval: float = 1.0,
+        learn_task_send_timeout: float = 10.0,
+        learn_task_abort_timeout: float = 5.0,
+        report_status_check_interval: float = 0.5,
         allow_busy_task: bool = False,
     ):
+        """
+        Constructor of a CWE object.
+
+        Args:
+            start_task_name: task name for starting the workflow
+            configure_task_name: task name for getting workflow config properties
+            submit_result_task_name: task name for submitting the final result
+            learn_task_name: name for the Learning Task (LT)
+            max_status_report_interval: max interval between status reports to the server
+            learn_task_check_interval: interval for checking incoming Learning Task (LT)
+            learn_task_send_timeout: timeout for sending the LT to other client(s)
+            learn_task_abort_timeout: time to wait for the LT to become stopped after aborting it
+            report_status_check_interval: interval for checking and sending status report
+            allow_busy_task:
+        """
         super().__init__()
         self.start_task_name = start_task_name
         self.configure_task_name = configure_task_name
         self.submit_result_task_name = submit_result_task_name
-        self.train_task_name = train_task_name
+        self.learn_task_name = learn_task_name
         self.max_status_report_interval = max_status_report_interval
-        self.status_check_interval = 1.0  # for internal check
-        self.task_abort_timeout = task_abort_timeout  # how long to wait for the task is stopped after aborting it
+        self.report_status_check_interval = report_status_check_interval
+        self.learn_task_abort_timeout = learn_task_abort_timeout
+        self.learn_task_check_interval = learn_task_check_interval
+        self.learn_task_send_timeout = learn_task_send_timeout
         self.allow_busy_task = allow_busy_task
         self.status_report_thread = threading.Thread(target=self._check_status)
         self.status_report_thread.daemon = True
@@ -65,7 +85,6 @@ class ClientWorkflowExecutor(Executor):
 
         self.learn_thread = threading.Thread(target=self._do_learn)
         self.learn_thread.daemon = True
-        self.task_check_interval = task_check_interval
         self.learn_task = None
         self.current_task = None
         self.learn_executor = None
@@ -78,11 +97,22 @@ class ClientWorkflowExecutor(Executor):
         self.last_result = None
         self.best_result = None
         self.best_metric = None
+        self.best_round = 0
 
-    def get_config_prop(self, key: str, default=None):
+    def get_config_prop(self, name: str, default=None):
+        """
+        Get a specified config property.
+
+        Args:
+            name: name of the property
+            default: default value to return if the property is not defined.
+
+        Returns:
+
+        """
         if not self.config:
             return default
-        return self.config.get(key, default)
+        return self.config.get(name, default)
 
     def handle_event(self, event_type: str, fl_ctx: FLContext):
         if event_type == EventType.START_RUN:
@@ -97,14 +127,16 @@ class ClientWorkflowExecutor(Executor):
                 return
 
             self.me = fl_ctx.get_identity_name()
-            self.learn_executor = runner.task_table.get(self.train_task_name)
+            self.learn_executor = runner.task_table.get(self.learn_task_name)
             if not self.learn_executor:
-                self.system_panic(f"no executor for task {self.train_task_name}", fl_ctx)
+                self.system_panic(f"no executor for task {self.learn_task_name}", fl_ctx)
                 return
 
             self.engine.register_aux_message_handler(
                 topic=Constant.TOPIC_LEARN, message_handle_func=self._process_learn_request
             )
+
+            self.initialize(fl_ctx)
 
             self.log_info(fl_ctx, "Started learn thread")
             self.learn_thread.start()
@@ -114,8 +146,38 @@ class ClientWorkflowExecutor(Executor):
             task = self.learn_task
             if task:
                 task.abort_signal.trigger(True)
+            self.finalize(fl_ctx)
+
+    def initialize(self, fl_ctx: FLContext):
+        """Called to initialize the executor.
+
+        Args:
+            fl_ctx: The FL Context
+
+        Returns: None
+
+        """
+        fl_ctx.set_prop(FLContextKey.EXECUTOR, self, private=True, sticky=False)
+        self.fire_event(AppEventType.EXECUTOR_INITIALIZED, fl_ctx)
+
+    def finalize(self, fl_ctx: FLContext):
+        """Called to finalize the executor.
+
+        Args:
+            fl_ctx: the FL Context
+
+        Returns: None
+
+        """
+        fl_ctx.set_prop(FLContextKey.EXECUTOR, self, private=True, sticky=False)
+        self.fire_event(AppEventType.EXECUTOR_FINALIZED, fl_ctx)
 
     def process_config(self):
+        """This is called to allow the subclass to process config props.
+
+        Returns: None
+
+        """
         pass
 
     def execute(self, task_name: str, shareable: Shareable, fl_ctx: FLContext, abort_signal: Signal) -> Shareable:
@@ -141,10 +203,32 @@ class ClientWorkflowExecutor(Executor):
             return make_reply(ReturnCode.TASK_UNKNOWN)
 
     def prepare_final_result(self, fl_ctx: FLContext) -> Shareable:
+        """
+        This is called to allow the subclass to prepare the final result before submitting it to server.
+        If the subclass does not overwrite this method, the current last_result will be returned.
+
+        Args:
+            fl_ctx: the FL Context
+
+        Returns: a Shareable object to be returned as the final result.
+
+        """
         return self.last_result
 
     @abstractmethod
     def start_workflow(self, shareable: Shareable, fl_ctx: FLContext, abort_signal: Signal) -> Shareable:
+        """
+        This is called for the subclass to start the workflow.
+        This only happens on the starting_client.
+
+        Args:
+            shareable: the initial task data (e.g. initial model weights)
+            fl_ctx: FL context
+            abort_signal: abort signal for task execution
+
+        Returns:
+
+        """
         pass
 
     def _check_status(self):
@@ -176,11 +260,11 @@ class ClientWorkflowExecutor(Executor):
                     reply = resp.get("server")
                     if reply and isinstance(reply, Shareable) and reply.get_return_code() == ReturnCode.OK:
                         self.last_status_report_time = now
-            time.sleep(self.status_check_interval)
+            time.sleep(self.report_status_check_interval)
 
-    def set_learn_task(self, task_name: str, task_data: Shareable, fl_ctx: FLContext) -> bool:
+    def set_learn_task(self, task_data: Shareable, fl_ctx: FLContext) -> bool:
         task_data.set_header(AppConstants.NUM_ROUNDS, self.get_config_prop(AppConstants.NUM_ROUNDS))
-        task = _LearnTask(task_name, task_data, fl_ctx)
+        task = _LearnTask(self.learn_task_name, task_data, fl_ctx)
         current_task = self.learn_task
         if not current_task:
             self.learn_task = task
@@ -199,8 +283,8 @@ class ClientWorkflowExecutor(Executor):
         # monitor until the task is done
         start = time.time()
         while self.learn_task:
-            if time.time() - start > self.task_abort_timeout:
-                self.log_error(fl_ctx, f"failed to stop the running task after {self.task_abort_timeout} seconds")
+            if time.time() - start > self.learn_task_abort_timeout:
+                self.log_error(fl_ctx, f"failed to stop the running task after {self.learn_task_abort_timeout} seconds")
                 return False
             time.sleep(0.1)
 
@@ -215,10 +299,10 @@ class ClientWorkflowExecutor(Executor):
                 self.logger.info("Got a Learn task")
                 try:
                     self.do_learn_task(t.task_name, t.task_data, t.fl_ctx, t.abort_signal)
-                except Exception:
+                except:
                     self.logger.log(f"exception from do_learn_task: {secure_format_traceback()}")
                 self.learn_task = None
-            time.sleep(self.task_check_interval)
+            time.sleep(self.learn_task_check_interval)
 
     def update_status(self, status: StatusReport, timestamp: float):
         status.best_metric = self.best_metric
@@ -231,12 +315,18 @@ class ClientWorkflowExecutor(Executor):
 
     @abstractmethod
     def do_learn_task(self, name: str, data: Shareable, fl_ctx: FLContext, abort_signal: Signal):
-        # do the prepared Learn task
-        pass
+        """This is called to do a Learn Task.
+        Subclass must implement this method.
 
-    @abstractmethod
-    def prepare_learn_task(self, data: Shareable, fl_ctx: FLContext):
-        # called when I receive a Learn request to prepare a task for myself
+        Args:
+            name: task name
+            data: task data
+            fl_ctx: FL context of the task
+            abort_signal: abort signal for the task execution
+
+        Returns:
+
+        """
         pass
 
     def _process_learn_request(self, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
@@ -261,18 +351,20 @@ class ClientWorkflowExecutor(Executor):
             self.set_error(ReturnCode.EXECUTION_EXCEPTION)
             return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
-        self.prepare_learn_task(request, fl_ctx)
-
         self.log_info(fl_ctx, f"accepted learn request from {sender}")
-        self.set_learn_task(task_name=self.train_task_name, task_data=request, fl_ctx=fl_ctx)
+        self.set_learn_task(task_data=request, fl_ctx=fl_ctx)
         return make_reply(ReturnCode.OK)
 
-    def send_learn_task(self, targets: list, request: Shareable, timeout, fl_ctx: FLContext) -> bool:
+    def send_learn_task(self, targets: list, request: Shareable, fl_ctx: FLContext) -> bool:
         self.log_info(fl_ctx, f"sending learn task to clients {targets}")
         request.set_header(AppConstants.NUM_ROUNDS, self.get_config_prop(AppConstants.NUM_ROUNDS))
 
         resp = self.engine.send_aux_request(
-            targets=targets, topic=Constant.TOPIC_LEARN, request=request, timeout=timeout, fl_ctx=fl_ctx
+            targets=targets,
+            topic=Constant.TOPIC_LEARN,
+            request=request,
+            timeout=self.learn_task_send_timeout,
+            fl_ctx=fl_ctx,
         )
 
         assert isinstance(resp, dict)
@@ -296,7 +388,7 @@ class ClientWorkflowExecutor(Executor):
 
         self.log_info(fl_ctx, f"started training round {current_round}")
         try:
-            result = self.learn_executor.execute(self.train_task_name, data, fl_ctx, abort_signal)
+            result = self.learn_executor.execute(self.learn_task_name, data, fl_ctx, abort_signal)
         except:
             self.log_exception(fl_ctx, f"trainer exception: {secure_format_traceback()}")
             result = make_reply(ReturnCode.EXECUTION_EXCEPTION)

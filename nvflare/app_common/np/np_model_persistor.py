@@ -74,3 +74,4 @@ class NPModelPersistor(ModelPersistor):
         model_path = os.path.join(model_root_dir, self.model_name)
         np.save(model_path, model_learnable[ModelLearnableKey.WEIGHTS][NPConstants.NUMPY_KEY])
         self.log_info(fl_ctx, f"Saved numpy model to: {model_path}")
+        self.log_info(fl_ctx, f"Model: {model_learnable}")

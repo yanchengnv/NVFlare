@@ -136,7 +136,9 @@ class NPTrainer(Executor):
         )
 
         # artificial delay
-        time.sleep(random.uniform(1.0, 5.0))
+        # if fl_ctx.get_identity_name() == "blue":
+        #     time.sleep(3.0)
+        # time.sleep(random.uniform(1.0, 5.0))
 
         return outgoing_dxo.to_shareable()
 

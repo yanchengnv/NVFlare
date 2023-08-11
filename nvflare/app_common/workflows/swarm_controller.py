@@ -22,6 +22,7 @@ class SwarmController(ClientWorkflowController):
     def __init__(
         self,
         num_rounds: int,
+        start_round: int = 0,
         persistor_id="persistor",
         shareable_generator_id="shareable_generator",
         start_task_name=Constant.TASK_NAME_START,
@@ -41,6 +42,7 @@ class SwarmController(ClientWorkflowController):
         ClientWorkflowController.__init__(
             self,
             num_rounds=num_rounds,
+            start_round=start_round,
             persistor_id=persistor_id,
             shareable_generator_id=shareable_generator_id,
             start_task_name=start_task_name,
@@ -61,18 +63,27 @@ class SwarmController(ClientWorkflowController):
     def start_controller(self, fl_ctx: FLContext):
         super().start_controller(fl_ctx)
         if not self.train_clients:
+            # every participating client is a train client
             self.train_clients = []
         else:
             for c in self.train_clients:
                 if c not in self.participating_clients:
-                    raise RuntimeError(f"train client {c} is not in participating_clients")
+                    raise RuntimeError(f"Config Error: train client {c} is not in participating_clients")
 
         if not self.aggr_clients:
+            # every participating client is an aggr client
             self.aggr_clients = []
         else:
             for c in self.aggr_clients:
                 if c not in self.participating_clients:
-                    raise RuntimeError(f"aggr client {c} is not in participating_clients")
+                    raise RuntimeError(f"Config Error: aggr client {c} is not in participating_clients")
+
+        # make sure every participating client is either training or aggr client
+        if self.train_clients and self.aggr_clients:
+            # both are explicitly specified
+            for c in self.participating_clients:
+                if c not in self.train_clients and c not in self.aggr_clients:
+                    raise RuntimeError(f"Config Error:  client {c} is neither train client nor aggr client")
 
     def prepare_config(self):
         return {Constant.AGGR_CLIENTS: self.aggr_clients, Constant.TRAIN_CLIENTS: self.train_clients}

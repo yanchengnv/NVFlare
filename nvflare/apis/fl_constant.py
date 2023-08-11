@@ -78,6 +78,7 @@ class ReservedKey(object):
     IS_RESEND = "__is_resend__"
     RUNNER = "__runner__"
     WORKFLOW = "__workflow__"
+    EXECUTOR = "__executor__"
     REPLY = "__reply__"
     EVENT_ORIGIN = "__event_origin__"
     EVENT_ORIGIN_SITE = "__event_origin_site__"
@@ -124,6 +125,7 @@ class FLContextKey(object):
     IS_CLIENT_TASK_RESEND = ReservedKey.IS_RESEND
     RUNNER = ReservedKey.RUNNER
     WORKFLOW = ReservedKey.WORKFLOW
+    EXECUTOR = ReservedKey.EXECUTOR
     SHAREABLE = ReservedKey.SHAREABLE
     RUN_ABORT_SIGNAL = ReservedKey.RUN_ABORT_SIGNAL
     ARGS = ReservedKey.ARGS
@@ -256,6 +258,7 @@ class NonSerializableKeys(object):
         ReservedKey.ENGINE,
         ReservedKey.MANAGER,
         ReservedKey.RUNNER,
+        ReservedKey.EXECUTOR,
         FLContextKey.SCOPE_PROPERTIES,
         FLContextKey.SCOPE_OBJECT,
         FLContextKey.WORKSPACE_OBJECT,

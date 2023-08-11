@@ -26,6 +26,7 @@ class Constant:
     CLIENTS = "cw.clients"
     CLIENT_ORDER = "cw.client_order"
     LAST_ROUND = "cw.last_round"
+    START_ROUND = "cw.start_round"
     START_TIME = "cw.start_time"
     END_TIME = "cw.end_time"
     LAST_RESULT = "cw.last_result"
@@ -51,7 +52,7 @@ class RROrder:
 
 
 class StatusReport:
-    def __init__(self, last_round=0, start_time=None, end_time=None, best_metric=None, all_done=False):
+    def __init__(self, last_round=-1, start_time=None, end_time=None, best_metric=None, all_done=False):
         self.last_round = last_round
         self.start_time = start_time
         self.end_time = end_time

@@ -62,7 +62,6 @@ class Gatherer(FLComponent):
         self.start_time = time.time()
         self.timeout = timeout
 
-        self.cancelled = False
         for t in trainers:
             self.trainer_statuses[t] = _TrainerStatus(t)
         if min_responses_required <= 0 or min_responses_required >= len(trainers):
@@ -90,7 +89,8 @@ class Gatherer(FLComponent):
             return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
         if result_round > self.for_round:
-            # this should never happen
+            # this should never happen!
+            # otherwise it means that the client is sending me result for a round that I couldn't possibly schedule!
             self.log_error(
                 fl_ctx,
                 f"logic error: received result from {client_name} for round {result_round}, "
@@ -100,23 +100,20 @@ class Gatherer(FLComponent):
             return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
         if result_round < self.for_round:
-            # this is a late result
+            # this is a late result for a round that I scheduled in the past.
+            # Note: we still accept it!
             self.log_warning(
                 fl_ctx,
                 f"received late result from {client_name} for round {result_round}, "
                 f"which is < gatherer's current round {self.for_round}",
             )
 
-        if self.cancelled:
-            self.log_warning(
-                fl_ctx, f"received late result from {client_name} for round {result_round} after gatherer's closed"
-            )
-
-        if result_round == self.for_round and not self.cancelled:
+        if result_round == self.for_round:
+            # this is the result that I'm waiting for.
             now = time.time()
             ts.reply_time = now
             if not self.min_resps_received_time:
-                # see how many responses have been received
+                # see how many responses I have received
                 num_resps_received = 0
                 for _, ts in self.trainer_statuses.items():
                     if ts.reply_time:
@@ -129,7 +126,7 @@ class Gatherer(FLComponent):
             self.log_error(fl_ctx, f"Bad result from {client_name} for round {result_round}: {rc}.")
             return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
-        fl_ctx.set_prop(AppConstants.CURRENT_ROUND, result_round, private=True, sticky=True)
+        fl_ctx.set_prop(AppConstants.CURRENT_ROUND, self.for_round, private=True, sticky=True)
         fl_ctx.set_prop(AppConstants.TRAINING_RESULT, result, private=True, sticky=False)
         self.fire_event(AppEventType.BEFORE_CONTRIBUTION_ACCEPT, fl_ctx)
 
@@ -153,18 +150,12 @@ class Gatherer(FLComponent):
         self.log_info(fl_ctx, "End aggregation.")
         return aggr_result
 
-    def cancel(self):
-        self.cancelled = True
-
     def is_done(self):
         unfinished = 0
         for c, s in self.trainer_statuses.items():
             if not s.reply_time:
                 unfinished += 1
         if unfinished == 0:
-            return True
-
-        if self.cancelled:
             return True
 
         # timeout?
@@ -186,12 +177,12 @@ class SwarmExecutor(ClientWorkflowExecutor):
         start_task_name=Constant.TASK_NAME_START,
         configure_task_name=Constant.TASK_NAME_CONFIGURE,
         submit_result_task_name=Constant.TASK_NAME_SUBMIT_RESULT,
-        train_task_name=AppConstants.TASK_TRAIN,
+        learn_task_name=AppConstants.TASK_TRAIN,
         max_status_report_interval: float = 600.0,
-        task_check_interval: float = 1.0,
-        task_abort_timeout: float = 5.0,
-        task_send_timeout: float = 30.0,
-        train_task_timeout=None,
+        learn_task_check_interval: float = 1.0,
+        learn_task_abort_timeout: float = 5.0,
+        learn_task_send_timeout: float = 30.0,
+        learn_task_timeout=None,
         min_responses_required: int = 1,
         wait_time_after_min_resps_received: float = 10.0,
         aggregator_id=AppConstants.DEFAULT_AGGREGATOR_ID,
@@ -201,14 +192,14 @@ class SwarmExecutor(ClientWorkflowExecutor):
             start_task_name=start_task_name,
             configure_task_name=configure_task_name,
             submit_result_task_name=submit_result_task_name,
-            train_task_name=train_task_name,
+            learn_task_name=learn_task_name,
             max_status_report_interval=max_status_report_interval,
-            task_check_interval=task_check_interval,
-            task_abort_timeout=task_abort_timeout,
+            learn_task_check_interval=learn_task_check_interval,
+            learn_task_send_timeout=learn_task_send_timeout,
+            learn_task_abort_timeout=learn_task_abort_timeout,
             allow_busy_task=True,
         )
-        self.task_send_timeout = task_send_timeout
-        self.train_task_timeout = train_task_timeout
+        self.learn_task_timeout = learn_task_timeout
         self.min_responses_required = min_responses_required
         self.wait_time_after_min_resps_received = wait_time_after_min_resps_received
         self.aggregator_id = aggregator_id
@@ -221,7 +212,7 @@ class SwarmExecutor(ClientWorkflowExecutor):
         self.aggrs = None
         self.is_trainer = False
         self.is_aggr = False
-        self.last_round_done = 0
+        self.last_aggr_round_done = -1
 
     def process_config(self):
         all_clients = self.get_config_prop(Constant.CLIENTS)
@@ -229,7 +220,6 @@ class SwarmExecutor(ClientWorkflowExecutor):
         self.trainers = self.get_config_prop(Constant.TRAIN_CLIENTS)
         if not self.trainers:
             self.trainers = all_clients
-
         self.is_trainer = self.me in self.trainers
 
         self.aggrs = self.get_config_prop(Constant.AGGR_CLIENTS)
@@ -270,6 +260,7 @@ class SwarmExecutor(ClientWorkflowExecutor):
             self.best_result = fl_ctx.get_prop(AppConstants.GLOBAL_MODEL)
             self.log_info(fl_ctx, f"Received GLOBAL_BEST_MODEL_AVAILABLE: best metric={self.best_metric}")
             current_round = fl_ctx.get_prop(AppConstants.CURRENT_ROUND)
+            self.best_round = current_round
             self.update_status(status=StatusReport(last_round=current_round), timestamp=time.time())
 
     def start_workflow(self, shareable: Shareable, fl_ctx: FLContext, abort_signal: Signal) -> Shareable:
@@ -281,7 +272,9 @@ class SwarmExecutor(ClientWorkflowExecutor):
             fl_ctx, f"Starting Swarm Workflow on clients {clients}, aggrs {aggr_clients}, trainers {train_clients}"
         )
 
-        if not self._scatter(shareable, 1, fl_ctx):
+        if not self._scatter(
+            task_data=shareable, for_round=self.get_config_prop(Constant.START_ROUND, 0), fl_ctx=fl_ctx
+        ):
             return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
         self.log_info(fl_ctx, "Started Swarm Workflow")
@@ -301,8 +294,7 @@ class SwarmExecutor(ClientWorkflowExecutor):
         task_data.set_header(Constant.AGGREGATOR, aggr)
 
         self.log_info(fl_ctx, f"broadcasting learn task of round {for_round} to {clients}; aggr client is {aggr}")
-
-        return self.send_learn_task(targets=clients, request=task_data, timeout=self.task_send_timeout, fl_ctx=fl_ctx)
+        return self.send_learn_task(targets=clients, request=task_data, fl_ctx=fl_ctx)
 
     def _monitor_gather(self):
         while True:
@@ -313,9 +305,9 @@ class SwarmExecutor(ClientWorkflowExecutor):
             if gatherer:
                 assert isinstance(gatherer, Gatherer)
                 if gatherer.is_done():
+                    self.last_aggr_round_done = gatherer.for_round
                     self.gatherer = None
                     self.gatherer_waiter.clear()
-                    gatherer.cancel()
                     try:
                         self._end_gather(gatherer)
                     except:
@@ -337,7 +329,9 @@ class SwarmExecutor(ClientWorkflowExecutor):
 
         # are we done with training?
         now = time.time()
-        if gatherer.for_round >= self.get_config_prop(AppConstants.NUM_ROUNDS):
+        num_rounds_done = gatherer.for_round - self.get_config_prop(Constant.START_ROUND, 0) + 1
+        if num_rounds_done >= self.get_config_prop(AppConstants.NUM_ROUNDS):
+            self.log_info(fl_ctx, f"Swarm Learning Done: number of rounds completed {num_rounds_done}")
             self.update_status(
                 status=StatusReport(
                     last_round=gatherer.for_round, start_time=gatherer.start_time, end_time=now, all_done=True
@@ -361,14 +355,21 @@ class SwarmExecutor(ClientWorkflowExecutor):
 
             gatherer = self.gatherer
             if not gatherer:
-                # got this from a fast client before I even create the waiter.
+                # this could be from a fast client before I even create the waiter;
+                # or from a late client after I already finished gathering.
+                if current_round <= self.last_aggr_round_done:
+                    # late client case - drop the result
+                    self.log_info(fl_ctx, f"dropped result from late {client_name} for round {current_round}")
+                    return make_reply(ReturnCode.OK)
+
+                # case of fast client
                 # wait until the gatherer is set up.
                 self.log_info(fl_ctx, f"got result from {client_name} for round {current_round} before gatherer setup")
-                self.gatherer_waiter.wait(self.task_abort_timeout)
+                self.gatherer_waiter.wait(self.learn_task_abort_timeout)
 
             gatherer = self.gatherer
             if not gatherer:
-                self.log_error(fl_ctx, f"Still no gatherer after {self.task_abort_timeout} seconds")
+                self.log_error(fl_ctx, f"Still no gatherer after {self.learn_task_abort_timeout} seconds")
                 self.log_error(fl_ctx, f"Ignored result from {client_name} for round {current_round} since no gatherer")
                 self.set_error(ReturnCode.EXECUTION_EXCEPTION)
                 return make_reply(ReturnCode.EXECUTION_EXCEPTION)
@@ -422,7 +423,7 @@ class SwarmExecutor(ClientWorkflowExecutor):
                 all_clients=self.get_config_prop(Constant.CLIENTS),
                 trainers=self.trainers,
                 for_round=current_round,
-                timeout=self.train_task_timeout,
+                timeout=self.learn_task_timeout,
                 min_responses_required=self.min_responses_required,
                 wait_time_after_min_resps_received=self.wait_time_after_min_resps_received,
                 aggregator=self.aggregator,
@@ -455,7 +456,7 @@ class SwarmExecutor(ClientWorkflowExecutor):
                 targets=[aggr],
                 topic=Constant.TOPIC_RESULT,
                 request=result,
-                timeout=self.task_send_timeout,
+                timeout=self.learn_task_send_timeout,
                 fl_ctx=fl_ctx,
             )
             reply = resp.get(aggr)
@@ -490,10 +491,8 @@ class SwarmExecutor(ClientWorkflowExecutor):
                 timestamp=end_time,
             )
 
-    def prepare_learn_task(self, data: Shareable, fl_ctx: FLContext):
-        pass
-
     def prepare_final_result(self, fl_ctx: FLContext) -> Shareable:
+        # My last result is a ModelLearnable. Must convert it to Shareable.
         result = None
         if self.best_result:
             self.log_info(fl_ctx, f"I have a best result with metric {self.best_metric}")

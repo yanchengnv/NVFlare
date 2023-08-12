@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import copy
 import threading
 import time
 from abc import abstractmethod
@@ -23,7 +24,7 @@ from nvflare.apis.shareable import Shareable, make_reply
 from nvflare.apis.signal import Signal
 from nvflare.app_common.app_constant import AppConstants
 from nvflare.app_common.app_event_type import AppEventType
-from nvflare.app_common.utils.cw_utils import Constant, StatusReport, execution_failure
+from nvflare.app_common.utils.cw_utils import Constant, StatusReport, topic_for_end_workflow
 from nvflare.security.logging import secure_format_traceback
 
 
@@ -75,8 +76,6 @@ class ClientWorkflowExecutor(Executor):
         self.learn_task_check_interval = learn_task_check_interval
         self.learn_task_send_timeout = learn_task_send_timeout
         self.allow_busy_task = allow_busy_task
-        self.status_report_thread = threading.Thread(target=self._check_status)
-        self.status_report_thread.daemon = True
         self.current_status = StatusReport()
         self.learn_error = None
         self.last_status_report_time = time.time()  # time of last status report to server
@@ -140,13 +139,31 @@ class ClientWorkflowExecutor(Executor):
 
             self.log_info(fl_ctx, "Started learn thread")
             self.learn_thread.start()
-            self.status_report_thread.start()
+        elif event_type == EventType.BEFORE_GET_TASK:
+            # add my status to fl_ctx
+            my_wf_id = self.get_config_prop(FLContextKey.WORKFLOW)
+            if not my_wf_id:
+                return
+            report = self._get_status_report()
+            if not report:
+                self.log_info(fl_ctx, "nothing to report this time")
+                return
+            self._add_status_report(report, fl_ctx)
+
         elif event_type in [EventType.ABORT_TASK, EventType.END_RUN]:
-            self.asked_to_stop = True
-            task = self.learn_task
-            if task:
-                task.abort_signal.trigger(True)
-            self.finalize(fl_ctx)
+            if not self.asked_to_stop:
+                self.asked_to_stop = True
+                self._abort_current_task(fl_ctx)
+                self.finalize(fl_ctx)
+
+    def _add_status_report(self, report: StatusReport, fl_ctx: FLContext):
+        reports = fl_ctx.get_prop(Constant.STATUS_REPORTS)
+        if not reports:
+            reports = {}
+            # set the prop as public so it will be sent to the peer in peer_context
+            fl_ctx.set_prop(Constant.STATUS_REPORTS, reports, sticky=False, private=False)
+        my_wf_id = self.get_config_prop(FLContextKey.WORKFLOW)
+        reports[my_wf_id] = report.to_dict()
 
     def initialize(self, fl_ctx: FLContext):
         """Called to initialize the executor.
@@ -170,6 +187,7 @@ class ClientWorkflowExecutor(Executor):
 
         """
         fl_ctx.set_prop(FLContextKey.EXECUTOR, self, private=True, sticky=False)
+        fl_ctx.set_prop(FLContextKey.WORKFLOW, self.get_config_prop(FLContextKey.WORKFLOW), private=True, sticky=False)
         self.fire_event(AppEventType.EXECUTOR_FINALIZED, fl_ctx)
 
     def process_config(self):
@@ -184,6 +202,16 @@ class ClientWorkflowExecutor(Executor):
         if task_name == self.configure_task_name:
             self.config = shareable[Constant.CONFIG]
             self.process_config()
+            my_wf_id = self.get_config_prop(FLContextKey.WORKFLOW)
+            if not my_wf_id:
+                self.log_error(fl_ctx, "missing workflow id in configuration!")
+                return make_reply(ReturnCode.BAD_REQUEST_DATA)
+
+            self.log_info(fl_ctx, f"got my workflow id {my_wf_id}")
+            self.engine.register_aux_message_handler(
+                topic=topic_for_end_workflow(my_wf_id),
+                message_handle_func=self._process_end_workflow,
+            )
             return make_reply(ReturnCode.OK)
 
         if task_name == self.start_task_name:
@@ -231,36 +259,36 @@ class ClientWorkflowExecutor(Executor):
         """
         pass
 
-    def _check_status(self):
-        while not self.asked_to_stop:
+    def _get_status_report(self):
+        with self.status_lock:
             must_report = False
             now = time.time()
-            if self.status_change_time > self.last_status_report_time:
+            if self.learn_error:
+                must_report = True
+            elif self.status_change_time > self.last_status_report_time:
                 # status has changed since last reported:
                 must_report = True
             elif now - self.last_status_report_time > self.max_status_report_interval:
                 # too long after last report time. report again even if no status change to keep alive
                 must_report = True
 
-            if must_report:
-                # do status report
-                with self.engine.new_context() as fl_ctx:
-                    if self.learn_error:
-                        # report error!
-                        request = execution_failure(self.learn_error)
-                        topic = Constant.TOPIC_FAILURE
-                    else:
-                        request = self.current_status.to_shareable()
-                        topic = Constant.TOPIC_REPORT_STATUS
+            if not must_report:
+                return None
 
-                    self.log_info(fl_ctx, f"send status report: {request}")
-                    resp = self.engine.send_aux_request(
-                        targets=[], topic=topic, request=request, timeout=2.0, fl_ctx=fl_ctx
-                    )
-                    reply = resp.get("server")
-                    if reply and isinstance(reply, Shareable) and reply.get_return_code() == ReturnCode.OK:
-                        self.last_status_report_time = now
-            time.sleep(self.report_status_check_interval)
+            # do status report
+            report = copy.copy(self.current_status)
+            if self.learn_error:
+                report.error = self.learn_error
+            return report
+
+    def _abort_current_task(self, fl_ctx: FLContext):
+        current_task = self.learn_task
+        if not current_task:
+            return
+
+        current_task.abort_signal.trigger(True)
+        fl_ctx.set_prop(FLContextKey.TASK_NAME, current_task.task_name)
+        self.fire_event(EventType.ABORT_TASK, fl_ctx)
 
     def set_learn_task(self, task_data: Shareable, fl_ctx: FLContext) -> bool:
         task_data.set_header(AppConstants.NUM_ROUNDS, self.get_config_prop(AppConstants.NUM_ROUNDS))
@@ -275,10 +303,7 @@ class ClientWorkflowExecutor(Executor):
 
         # already has a task!
         self.log_warning(fl_ctx, "already running a task: aborting it")
-        assert isinstance(current_task, _LearnTask)
-        current_task.abort_signal.trigger(True)
-        fl_ctx.set_prop(FLContextKey.TASK_NAME, current_task.task_name)
-        self.fire_event(EventType.ABORT_TASK, fl_ctx)
+        self._abort_current_task(fl_ctx)
 
         # monitor until the task is done
         start = time.time()
@@ -305,13 +330,15 @@ class ClientWorkflowExecutor(Executor):
             time.sleep(self.learn_task_check_interval)
 
     def update_status(self, status: StatusReport, timestamp: float):
-        status.best_metric = self.best_metric
-        self.current_status = status
-        self.status_change_time = timestamp
+        with self.status_lock:
+            status.best_metric = self.best_metric
+            self.current_status = status
+            self.status_change_time = timestamp
 
     def set_error(self, err: str):
-        self.learn_error = err
-        self.status_change_time = time.time()
+        with self.status_lock:
+            self.learn_error = err
+            self.status_change_time = time.time()
 
     @abstractmethod
     def do_learn_task(self, name: str, data: Shareable, fl_ctx: FLContext, abort_signal: Signal):
@@ -328,6 +355,13 @@ class ClientWorkflowExecutor(Executor):
 
         """
         pass
+
+    def _process_end_workflow(self, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
+        self.log_info(fl_ctx, f"ending workflow {self.get_config_prop(FLContextKey.WORKFLOW)}")
+        self.asked_to_stop = True
+        self._abort_current_task(fl_ctx)
+        self.finalize(fl_ctx)
+        return make_reply(ReturnCode.OK)
 
     def _process_learn_request(self, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
         try:

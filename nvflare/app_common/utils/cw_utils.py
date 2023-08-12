@@ -22,6 +22,7 @@ class Constant:
     TASK_NAME_START = "start"
     TASK_NAME_SUBMIT_RESULT = "submit_result"
 
+    ERROR = "cw.error"
     ORDER = "cw.order"
     CLIENTS = "cw.clients"
     CLIENT_ORDER = "cw.client_order"
@@ -32,17 +33,17 @@ class Constant:
     LAST_RESULT = "cw.last_result"
     RESULT_TYPE = "cw.result_type"
     ALL_DONE = "cw.all_done"
-    REASON = "cw.reason"
     AGGR_CLIENTS = "cw.aggr_clients"
     TRAIN_CLIENTS = "cw.train_clients"
     AGGREGATOR = "cw.aggr"
     BEST_METRIC = "cw.best_metric"
     CONFIG = "cw.config"
+    STATUS_REPORTS = "cw.status_reports"
 
     TOPIC_REPORT_STATUS = "cw.report_status"
-    TOPIC_FAILURE = "cw.failure"
     TOPIC_LEARN = "cw.learn"
     TOPIC_RESULT = "cw.result"
+    TOPIC_END_WORKFLOW = "cw.end_wf"
 
 
 class RROrder:
@@ -52,17 +53,27 @@ class RROrder:
 
 
 class StatusReport:
-    def __init__(self, last_round=-1, start_time=None, end_time=None, best_metric=None, all_done=False):
+    def __init__(
+        self,
+        last_round=-1,
+        start_time=None,
+        end_time=None,
+        best_metric=None,
+        all_done=False,
+        error: str = "",
+    ):
         self.last_round = last_round
         self.start_time = start_time
         self.end_time = end_time
         self.best_metric = best_metric
         self.all_done = all_done
+        self.error = error
 
-    def to_shareable(self) -> Shareable:
-        result = Shareable()
-        result[Constant.LAST_ROUND] = self.last_round
-        result[Constant.ALL_DONE] = self.all_done
+    def to_dict(self) -> dict:
+        result = {
+            Constant.LAST_ROUND: self.last_round,
+            Constant.ALL_DONE: self.all_done,
+        }
 
         if self.start_time:
             result[Constant.START_TIME] = self.start_time
@@ -70,6 +81,8 @@ class StatusReport:
             result[Constant.END_TIME] = self.end_time
         if self.best_metric:
             result[Constant.BEST_METRIC] = self.best_metric
+        if self.error:
+            result[Constant.ERROR] = self.error
         return result
 
     def __eq__(self, other):
@@ -83,10 +96,11 @@ class StatusReport:
             and self.end_time == other.end_time
             and self.all_done == other.all_done
             and self.best_metric == other.best_metric
+            and self.error == other.error
         )
 
 
-def status_report_from_shareable(d: Shareable) -> StatusReport:
+def status_report_from_dict(d: dict) -> StatusReport:
     last_round = d.get(Constant.LAST_ROUND)
     if last_round is None:
         raise ValueError(f"missing {Constant.LAST_ROUND} in status report")
@@ -94,16 +108,16 @@ def status_report_from_shareable(d: Shareable) -> StatusReport:
     end_time = d.get(Constant.END_TIME)
     all_done = d.get(Constant.ALL_DONE)
     best_metric = d.get(Constant.BEST_METRIC)
+    error = d.get(Constant.ERROR)
 
     return StatusReport(
-        last_round=last_round, start_time=start_time, end_time=end_time, best_metric=best_metric, all_done=all_done
+        last_round=last_round,
+        start_time=start_time,
+        end_time=end_time,
+        best_metric=best_metric,
+        all_done=all_done,
+        error=error,
     )
-
-
-def execution_failure(reason: str) -> Shareable:
-    s = Shareable()
-    s[Constant.REASON] = reason
-    return s
 
 
 def learnable_to_shareable(learnable: Learnable) -> Shareable:
@@ -132,3 +146,7 @@ def rotate_to_front(item, items: list):
 
         for i in range(num_items):
             items[i] = new_list[i]
+
+
+def topic_for_end_workflow(wf_id):
+    return f"{Constant.TOPIC_END_WORKFLOW}.{wf_id}"

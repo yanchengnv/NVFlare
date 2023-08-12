@@ -18,9 +18,10 @@ from datetime import datetime
 
 from nvflare.apis.client import Client
 from nvflare.apis.controller_spec import TaskCompletionStatus
+from nvflare.apis.fl_constant import FLContextKey
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.impl.controller import ClientTask, Controller, Task
-from nvflare.apis.shareable import ReturnCode, Shareable, make_reply
+from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
 from nvflare.app_common.abstract.learnable_persistor import LearnablePersistor
 from nvflare.app_common.abstract.shareable_generator import ShareableGenerator
@@ -30,7 +31,8 @@ from nvflare.app_common.utils.cw_utils import (
     StatusReport,
     learnable_to_shareable,
     shareable_to_learnable,
-    status_report_from_shareable,
+    status_report_from_dict,
+    topic_for_end_workflow,
 )
 
 
@@ -52,6 +54,7 @@ class ClientWorkflowController(Controller):
         shareable_generator_id="shareable_generator",
         configure_task_name=Constant.TASK_NAME_CONFIGURE,
         configure_task_timeout=2,
+        end_workflow_timeout=2.0,
         start_task_name=Constant.TASK_NAME_START,
         start_task_timeout=5,
         submit_result_task_name=Constant.TASK_NAME_SUBMIT_RESULT,
@@ -69,6 +72,7 @@ class ClientWorkflowController(Controller):
         self.configure_task_timeout = configure_task_timeout
         self.start_task_name = start_task_name
         self.start_task_timeout = start_task_timeout
+        self.end_workflow_timeout = end_workflow_timeout
         self.submit_result_task_name = submit_result_task_name
         self.submit_result_task_timeout = submit_result_task_timeout
         self.persistor_id = persistor_id
@@ -88,6 +92,7 @@ class ClientWorkflowController(Controller):
         self.cw_started = False
         self.asked_to_stop = False
         self._last_learnable = None
+        self.workflow_id = None
 
         if num_rounds <= 0:
             raise ValueError(f"invalid num_rounds {num_rounds}: must > 0")
@@ -96,7 +101,11 @@ class ClientWorkflowController(Controller):
             raise ValueError(f"Not enough participating_clients: must > 1, but got {participating_clients}")
 
     def start_controller(self, fl_ctx: FLContext):
-        self.log_debug(fl_ctx, "starting controller")
+        wf_id = fl_ctx.get_prop(FLContextKey.WORKFLOW)
+        self.log_debug(fl_ctx, f"starting controller for workflow {wf_id}")
+        if not wf_id:
+            raise RuntimeError("workflow ID is missing from FL context")
+        self.workflow_id = wf_id
         self.persistor = self._engine.get_component(self.persistor_id)
         if not isinstance(self.persistor, LearnablePersistor):
             raise RuntimeError(
@@ -135,14 +144,6 @@ class ClientWorkflowController(Controller):
         for c in self.participating_clients:
             self.client_statuses[c] = ClientStatus()
 
-        self._engine.register_aux_message_handler(
-            topic=Constant.TOPIC_REPORT_STATUS, message_handle_func=self._process_status_report
-        )
-
-        self._engine.register_aux_message_handler(
-            topic=Constant.TOPIC_FAILURE, message_handle_func=self._process_failure
-        )
-
     @abstractmethod
     def prepare_config(self) -> dict:
         pass
@@ -162,6 +163,7 @@ class ClientWorkflowController(Controller):
             Constant.CLIENTS: self.participating_clients,
             AppConstants.NUM_ROUNDS: self.num_rounds,
             Constant.START_ROUND: self.start_round,
+            FLContextKey.WORKFLOW: self.workflow_id,
         }
 
         extra_config = self.prepare_config()
@@ -210,7 +212,7 @@ class ClientWorkflowController(Controller):
         task = Task(
             name=self.start_task_name,
             data=shareable,
-            timeout=self.configure_task_timeout,
+            timeout=self.start_task_timeout,
             result_received_cb=self._process_start_reply,
         )
 
@@ -269,7 +271,41 @@ class ClientWorkflowController(Controller):
             else:
                 self.log_warning(fl_ctx, "no client selected for final result")
 
-        self.log_info(fl_ctx, "CW Control Flow done!")
+        # ask all clients to end the workflow
+        self.log_info(fl_ctx, f"asking all clients to end workflow {self.workflow_id}")
+        engine = fl_ctx.get_engine()
+        end_wf_request = Shareable()
+        resp = engine.send_aux_request(
+            targets=self.participating_clients,
+            topic=topic_for_end_workflow(self.workflow_id),
+            request=end_wf_request,
+            timeout=self.end_workflow_timeout,
+            fl_ctx=fl_ctx,
+        )
+
+        assert isinstance(resp, dict)
+        num_errors = 0
+        for c in self.participating_clients:
+            reply = resp.get(c)
+            if not reply:
+                self.log_error(fl_ctx, f"not reply from client {c} for ending workflow {self.workflow_id}")
+                num_errors += 1
+                continue
+
+            assert isinstance(reply, Shareable)
+            rc = reply.get_return_code(ReturnCode.OK)
+            if rc != ReturnCode.OK:
+                self.log_error(fl_ctx, f"client {c} failed to end workflow {self.workflow_id}: {rc}")
+                num_errors += 1
+
+        if num_errors > 0:
+            self.system_panic(f"failed to end workflow {self.workflow_id} on all clients", fl_ctx)
+
+        self.log_info(fl_ctx, f"Workflow {self.workflow_id} done!")
+
+    def process_task_request(self, client: Client, fl_ctx: FLContext):
+        self._update_client_status(fl_ctx)
+        return super().process_task_request(client, fl_ctx)
 
     def select_final_result(self, fl_ctx: FLContext) -> (str, Shareable):
         best_client = None
@@ -316,8 +352,8 @@ class ClientWorkflowController(Controller):
                 assert isinstance(cs, ClientStatus)
                 cs.ready_time = time.time()
         else:
-            reason = result.get(Constant.REASON, "?")
-            self.log_error(fl_ctx, f"client {client_task.client.name} failed to configure: {rc}: {reason}")
+            error = result.get(Constant.ERROR, "?")
+            self.log_error(fl_ctx, f"client {client_task.client.name} failed to configure: {rc}: {error}")
 
     def _process_start_reply(self, client_task: ClientTask, fl_ctx: FLContext):
         result = client_task.result
@@ -328,8 +364,8 @@ class ClientWorkflowController(Controller):
             self.log_info(fl_ctx, f"workflow started by client {client_name}")
             self.cw_started = True
         else:
-            reason = result.get(Constant.REASON, "?")
-            self.log_error(fl_ctx, f"client {client_task.client.name} couldn't start workflow: {rc}: {reason}")
+            error = result.get(Constant.ERROR, "?")
+            self.log_error(fl_ctx, f"client {client_task.client.name} couldn't start workflow: {rc}: {error}")
 
     def _process_final_result(self, client_task: ClientTask, fl_ctx: FLContext):
         result = client_task.result
@@ -374,17 +410,35 @@ class ClientWorkflowController(Controller):
 
         return False
 
-    def _update_client_status(self, fl_ctx: FLContext, client_name: str, result: Shareable):
+    def _update_client_status(self, fl_ctx: FLContext):
+        peer_ctx = fl_ctx.get_peer_context()
+        assert isinstance(peer_ctx, FLContext)
+        client_name = peer_ctx.get_identity_name()
         if client_name not in self.client_statuses:
             self.log_error(fl_ctx, f"received result from unknown client {client_name}!")
             return
 
+        # see whether status is available
+        reports = peer_ctx.get_prop(Constant.STATUS_REPORTS)
+        if not reports:
+            return
+
+        my_report = reports.get(self.workflow_id)
+        if not my_report:
+            return
+
+        report = status_report_from_dict(my_report)
         cs = self.client_statuses[client_name]
         assert isinstance(cs, ClientStatus)
         now = time.time()
         cs.last_report_time = now
         cs.num_reports += 1
-        report = status_report_from_shareable(result)
+
+        if report.error:
+            self.asked_to_stop = True
+            self.system_panic(f"received failure report from client {client_name}: {report.error}", fl_ctx)
+            return
+
         if cs.status != report:
             # updated
             cs.status = report
@@ -400,23 +454,6 @@ class ClientWorkflowController(Controller):
             self.log_info(
                 fl_ctx, f"ignored status report from client {client_name} on round {report.last_round}: no change"
             )
-
-    def _process_status_report(self, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
-        peer_ctx = fl_ctx.get_peer_context()
-        assert isinstance(peer_ctx, FLContext)
-        client_name = peer_ctx.get_identity_name()
-        self._update_client_status(fl_ctx, client_name=client_name, result=request)
-        return make_reply(ReturnCode.OK)
-
-    def _process_failure(self, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
-        # client reports that it cannot continue RR
-        peer_ctx = fl_ctx.get_peer_context()
-        assert isinstance(peer_ctx, FLContext)
-        client_name = peer_ctx.get_identity_name()
-        reason = request.get(Constant.REASON, "?")
-        self.asked_to_stop = True
-        self.system_panic(f"received failure report from client {client_name}: {reason}", fl_ctx)
-        return make_reply(ReturnCode.OK)
 
     def process_result_of_unknown_task(
         self, client: Client, task_name: str, client_task_id: str, result: Shareable, fl_ctx: FLContext

@@ -40,6 +40,7 @@ class EventType(object):
     BEFORE_PROCESS_SUBMISSION = "_before_process_submission"
     AFTER_PROCESS_SUBMISSION = "_after_process_submission"
 
+    BEFORE_GET_TASK = "_before_get_task"
     BEFORE_TASK_DATA_FILTER = "_before_task_data_filter"
     AFTER_TASK_DATA_FILTER = "_after_task_data_filter"
     BEFORE_TASK_RESULT_FILTER = "_before_task_result_filter"

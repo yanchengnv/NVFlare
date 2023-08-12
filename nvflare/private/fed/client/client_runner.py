@@ -413,6 +413,8 @@ class ClientRunner(FLComponent):
         """
         default_task_fetch_interval = self.default_task_fetch_interval
         self.log_debug(fl_ctx, "fetching task from server ...")
+
+        self.fire_event(EventType.BEFORE_GET_TASK, fl_ctx)
         task = self.engine.get_task_assignment(fl_ctx)
 
         if not task:

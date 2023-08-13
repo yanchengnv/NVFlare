@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 import threading
 import time
 
@@ -414,8 +415,13 @@ class ClientRunner(FLComponent):
         default_task_fetch_interval = self.default_task_fetch_interval
         self.log_debug(fl_ctx, "fetching task from server ...")
 
-        self.fire_event(EventType.BEFORE_GET_TASK, fl_ctx)
-        task = self.engine.get_task_assignment(fl_ctx)
+        # Make a copy of the fl_ctx to be used for event handling.
+        # This is because event handlers may add additional public props into it.
+        # We want to make sure that those added props are only for sending the request to server.
+        # Public props added to the temp context will be sent to the server as part of the peer-ctx!
+        temp_fl_ctx = copy.copy(fl_ctx)
+        self.fire_event(EventType.BEFORE_GET_TASK, temp_fl_ctx)
+        task = self.engine.get_task_assignment(temp_fl_ctx)
 
         if not task:
             self.log_debug(fl_ctx, "no task received - will try in {} secs".format(default_task_fetch_interval))

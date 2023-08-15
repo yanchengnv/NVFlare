@@ -16,14 +16,14 @@ from nvflare.apis.fl_component import FLComponent
 from nvflare.apis.fl_constant import FLContextKey
 from nvflare.apis.fl_context import FLContext
 from nvflare.app_common.app_event_type import AppEventType
-from nvflare.app_common.executors.cwe import ClientWorkflowExecutor
+from nvflare.app_common.cwf import SwarmClientController
 
 
 class CWEResultPrinter(FLComponent):
     def handle_event(self, event_type: str, fl_ctx: FLContext):
         if event_type == AppEventType.EXECUTOR_FINALIZED:
             e = fl_ctx.get_prop(FLContextKey.EXECUTOR)
-            if not isinstance(e, ClientWorkflowExecutor):
+            if not isinstance(e, SwarmClientController):
                 return
 
             if e.best_result:

@@ -13,12 +13,11 @@
 # limitations under the License.
 
 from nvflare.apis.fl_context import FLContext
-from nvflare.app_common.utils.cw_utils import Constant
+from nvflare.app_common.cwf.common import Constant
+from nvflare.app_common.cwf.server_ctl import ServerSideController
 
-from .cwc import ClientWorkflowController
 
-
-class SwarmController(ClientWorkflowController):
+class SwarmServerController(ServerSideController):
     def __init__(
         self,
         num_rounds: int,
@@ -39,8 +38,7 @@ class SwarmController(ClientWorkflowController):
         aggr_clients=None,
         train_clients=None,
     ):
-        ClientWorkflowController.__init__(
-            self,
+        super().__init__(
             num_rounds=num_rounds,
             start_round=start_round,
             persistor_id=persistor_id,

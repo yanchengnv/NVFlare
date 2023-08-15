@@ -19,12 +19,11 @@ from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import Shareable, make_reply
 from nvflare.apis.signal import Signal
 from nvflare.app_common.app_constant import AppConstants
-from nvflare.app_common.utils.cw_utils import Constant, RROrder, StatusReport, rotate_to_front
+from nvflare.app_common.cwf.client_ctl import ClientSideController
+from nvflare.app_common.cwf.common import Constant, RROrder, StatusReport, rotate_to_front
 
-from .cwe import ClientWorkflowExecutor
 
-
-class RRExecutor(ClientWorkflowExecutor):
+class CyclicClientController(ClientSideController):
     def __init__(
         self,
         start_task_name=Constant.TASK_NAME_START,

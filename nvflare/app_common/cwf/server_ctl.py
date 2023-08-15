@@ -26,7 +26,7 @@ from nvflare.apis.signal import Signal
 from nvflare.app_common.abstract.learnable_persistor import LearnablePersistor
 from nvflare.app_common.abstract.shareable_generator import ShareableGenerator
 from nvflare.app_common.app_constant import AppConstants
-from nvflare.app_common.utils.cw_utils import (
+from nvflare.app_common.cwf.common import (
     Constant,
     StatusReport,
     learnable_to_shareable,
@@ -45,7 +45,7 @@ class ClientStatus:
         self.status = StatusReport()
 
 
-class ClientWorkflowController(Controller):
+class ServerSideController(Controller):
     def __init__(
         self,
         num_rounds: int,

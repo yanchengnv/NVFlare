@@ -14,12 +14,11 @@
 
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import Shareable
-from nvflare.app_common.utils.cw_utils import Constant, RROrder, StatusReport
+from nvflare.app_common.cwf.common import Constant, RROrder, StatusReport
+from nvflare.app_common.cwf.server_ctl import ClientStatus, ServerSideController
 
-from .cwc import ClientStatus, ClientWorkflowController
 
-
-class RRController(ClientWorkflowController):
+class CyclicServerController(ServerSideController):
     def __init__(
         self,
         num_rounds: int,
@@ -38,8 +37,7 @@ class RRController(ClientWorkflowController):
         max_status_report_interval: float = 3600.0,
         rr_order: str = RROrder.FIXED,
     ):
-        ClientWorkflowController.__init__(
-            self,
+        super().__init__(
             num_rounds=num_rounds,
             persistor_id=persistor_id,
             shareable_generator_id=shareable_generator_id,

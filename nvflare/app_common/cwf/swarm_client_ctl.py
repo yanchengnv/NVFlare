@@ -26,10 +26,9 @@ from nvflare.app_common.abstract.learnable import Learnable
 from nvflare.app_common.abstract.shareable_generator import ShareableGenerator
 from nvflare.app_common.app_constant import AppConstants
 from nvflare.app_common.app_event_type import AppEventType
-from nvflare.app_common.utils.cw_utils import Constant, StatusReport
+from nvflare.app_common.cwf.client_ctl import ClientSideController
+from nvflare.app_common.cwf.common import Constant, StatusReport
 from nvflare.security.logging import secure_format_traceback
-
-from .cwe import ClientWorkflowExecutor
 
 
 class _TrainerStatus:
@@ -43,7 +42,7 @@ class Gatherer(FLComponent):
         self,
         fl_ctx: FLContext,
         for_round: int,
-        executor: ClientWorkflowExecutor,
+        executor: ClientSideController,
         aggregator: Aggregator,
         all_clients: list,
         trainers: list,
@@ -171,7 +170,7 @@ class Gatherer(FLComponent):
             return True
 
 
-class SwarmExecutor(ClientWorkflowExecutor):
+class SwarmClientController(ClientSideController):
     def __init__(
         self,
         start_task_name=Constant.TASK_NAME_START,
@@ -227,6 +226,11 @@ class SwarmExecutor(ClientWorkflowExecutor):
             self.aggrs = all_clients
         self.is_aggr = self.me in self.aggrs
 
+        self.engine.register_aux_message_handler(
+            topic=self.topic_for_my_workflow(Constant.TOPIC_RESULT),
+            message_handle_func=self._process_learn_result,
+        )
+
     def handle_event(self, event_type: str, fl_ctx: FLContext):
         super().handle_event(event_type, fl_ctx)
         if event_type == EventType.START_RUN:
@@ -246,10 +250,6 @@ class SwarmExecutor(ClientWorkflowExecutor):
                     fl_ctx,
                 )
                 return
-
-            self.engine.register_aux_message_handler(
-                topic=Constant.TOPIC_RESULT, message_handle_func=self._process_learn_result
-            )
 
             aggr_thread = threading.Thread(target=self._monitor_gather)
             aggr_thread.daemon = True
@@ -454,7 +454,7 @@ class SwarmExecutor(ClientWorkflowExecutor):
             self.log_info(fl_ctx, f"sending training result to aggregation client {aggr}")
             resp = self.engine.send_aux_request(
                 targets=[aggr],
-                topic=Constant.TOPIC_RESULT,
+                topic=self.topic_for_my_workflow(Constant.TOPIC_RESULT),
                 request=result,
                 timeout=self.learn_task_send_timeout,
                 fl_ctx=fl_ctx,

@@ -28,20 +28,26 @@ class CyclicClientController(ClientSideController):
         self,
         start_task_name=Constant.TASK_NAME_START,
         configure_task_name=Constant.TASK_NAME_CONFIGURE,
-        submit_result_task_name=Constant.TASK_NAME_SUBMIT_RESULT,
         learn_task_name=AppConstants.TASK_TRAIN,
+        persistor_id="persistor",
+        shareable_generator_id="shareable_generator",
         max_status_report_interval: float = 600.0,
         learn_task_check_interval: float = 0.5,
         learn_task_abort_timeout: float = 5.0,
+        learn_task_send_timeout: float = 10.0,
+        final_result_send_timeout: float = 10.0,
     ):
         super().__init__(
             start_task_name=start_task_name,
             configure_task_name=configure_task_name,
-            submit_result_task_name=submit_result_task_name,
             learn_task_name=learn_task_name,
+            persistor_id=persistor_id,
+            shareable_generator_id=shareable_generator_id,
             max_status_report_interval=max_status_report_interval,
             learn_task_check_interval=learn_task_check_interval,
             learn_task_abort_timeout=learn_task_abort_timeout,
+            learn_task_send_timeout=learn_task_send_timeout,
+            final_result_send_timeout=final_result_send_timeout,
             allow_busy_task=False,
         )
 
@@ -60,7 +66,9 @@ class CyclicClientController(ClientSideController):
         # set status report of starting task
         current_round = data.get_header(AppConstants.CURRENT_ROUND)
         start_time = time.time()
-        self.update_status(StatusReport(last_round=current_round, start_time=start_time), start_time)
+        self.update_status(
+            StatusReport(last_round=current_round, action="start_learn_task", timestamp=start_time), start_time
+        )
 
         # execute the task
         result = self.execute_train(data, fl_ctx, abort_signal)
@@ -72,6 +80,7 @@ class CyclicClientController(ClientSideController):
             return
 
         self.last_result = result
+        self.last_round = current_round
 
         # see whether we need to send to next leg
         end_time = time.time()
@@ -110,12 +119,16 @@ class CyclicClientController(ClientSideController):
                 result.set_header(AppConstants.CURRENT_ROUND, next_round)
                 self.log_info(fl_ctx, f"Starting new round {next_round} on clients: {client_order}")
 
+        if all_done:
+            learnable = self.shareable_generator.shareable_to_learnable(result, fl_ctx)
+            self.broadcast_final_result(learnable, fl_ctx, best_round=self.last_round)
+
         # update status
         self.update_status(
             status=StatusReport(
                 last_round=current_round,
-                start_time=start_time,
-                end_time=end_time,
+                timestamp=end_time,
+                action="finished_learn_task",
                 all_done=all_done,
             ),
             timestamp=end_time,

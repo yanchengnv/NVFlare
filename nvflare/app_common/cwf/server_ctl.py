@@ -13,27 +13,16 @@
 # limitations under the License.
 
 import time
-from abc import abstractmethod
 from datetime import datetime
 
 from nvflare.apis.client import Client
-from nvflare.apis.controller_spec import TaskCompletionStatus
 from nvflare.apis.fl_constant import FLContextKey
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.impl.controller import ClientTask, Controller, Task
 from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
-from nvflare.app_common.abstract.learnable_persistor import LearnablePersistor
-from nvflare.app_common.abstract.shareable_generator import ShareableGenerator
 from nvflare.app_common.app_constant import AppConstants
-from nvflare.app_common.cwf.common import (
-    Constant,
-    StatusReport,
-    learnable_to_shareable,
-    shareable_to_learnable,
-    status_report_from_dict,
-    topic_for_end_workflow,
-)
+from nvflare.app_common.cwf.common import Constant, StatusReport, status_report_from_dict, topic_for_end_workflow
 
 
 class ClientStatus:
@@ -50,15 +39,11 @@ class ServerSideController(Controller):
         self,
         num_rounds: int,
         start_round: int = 0,
-        persistor_id="persistor",
-        shareable_generator_id="shareable_generator",
         configure_task_name=Constant.TASK_NAME_CONFIGURE,
         configure_task_timeout=2,
         end_workflow_timeout=2.0,
         start_task_name=Constant.TASK_NAME_START,
         start_task_timeout=5,
-        submit_result_task_name=Constant.TASK_NAME_SUBMIT_RESULT,
-        submit_result_task_timeout=5,
         task_check_period: float = 0.5,
         job_status_check_interval: float = 2.0,
         starting_client: str = None,
@@ -73,10 +58,6 @@ class ServerSideController(Controller):
         self.start_task_name = start_task_name
         self.start_task_timeout = start_task_timeout
         self.end_workflow_timeout = end_workflow_timeout
-        self.submit_result_task_name = submit_result_task_name
-        self.submit_result_task_timeout = submit_result_task_timeout
-        self.persistor_id = persistor_id
-        self.shareable_generator_id = shareable_generator_id
         self.num_rounds = num_rounds
         self.start_round = start_round
         self.max_status_report_interval = max_status_report_interval
@@ -85,13 +66,9 @@ class ServerSideController(Controller):
         self.job_status_check_interval = job_status_check_interval
         self.starting_client = starting_client
         self.participating_clients = participating_clients
-        self.persistor = None
-        self.shareable_generator = None
-        self._learnable = None
         self.client_statuses = {}  # client name => ClientStatus
         self.cw_started = False
         self.asked_to_stop = False
-        self._last_learnable = None
         self.workflow_id = None
 
         if num_rounds <= 0:
@@ -106,22 +83,6 @@ class ServerSideController(Controller):
         if not wf_id:
             raise RuntimeError("workflow ID is missing from FL context")
         self.workflow_id = wf_id
-        self.persistor = self._engine.get_component(self.persistor_id)
-        if not isinstance(self.persistor, LearnablePersistor):
-            raise RuntimeError(
-                f"Persistor {self.persistor_id} must be a Persistor instance, but got {type(self.persistor)}"
-            )
-
-        if self.shareable_generator_id:
-            self.shareable_generator = self._engine.get_component(self.shareable_generator_id)
-            if not isinstance(self.shareable_generator, ShareableGenerator):
-                raise RuntimeError(
-                    f"Shareable generator {self.shareable_generator_id} must be a Shareable Generator instance, "
-                    f"but got {type(self.shareable_generator)}",
-                )
-
-        self._learnable = self.persistor.load(fl_ctx)
-        fl_ctx.set_prop(AppConstants.GLOBAL_MODEL, self._learnable, private=True, sticky=True)
 
         all_clients = self._engine.get_clients()
         if len(all_clients) <= 1:
@@ -144,20 +105,15 @@ class ServerSideController(Controller):
         for c in self.participating_clients:
             self.client_statuses[c] = ClientStatus()
 
-    @abstractmethod
     def prepare_config(self) -> dict:
-        pass
+        return {}
 
     def control_flow(self, abort_signal: Signal, fl_ctx: FLContext):
         # wait for every client to become ready
         self.log_info(fl_ctx, f"Waiting for clients to be ready: {self.participating_clients}")
 
         # GET STARTED
-        self.log_info(fl_ctx, f"Starting CW Control on Clients: {self.participating_clients}")
-        if self.shareable_generator:
-            model_shareable = self.shareable_generator.learnable_to_shareable(self._learnable, fl_ctx)
-        else:
-            model_shareable = learnable_to_shareable(self._learnable)
+        self.log_info(fl_ctx, f"Starting workflow on clients: {self.participating_clients}")
 
         learn_config = {
             Constant.CLIENTS: self.participating_clients,
@@ -207,8 +163,7 @@ class ServerSideController(Controller):
         self.log_info(fl_ctx, f"successfully configured clients {self.participating_clients}")
 
         # starting the starting_client
-        shareable = model_shareable
-
+        shareable = Shareable()
         task = Task(
             name=self.start_task_name,
             data=shareable,
@@ -240,36 +195,6 @@ class ServerSideController(Controller):
                 break
 
         self.log_info(fl_ctx, "Workflow finished on all clients")
-
-        if self.submit_result_task_name:
-            # try to get the final result
-            target_name, shareable = self.select_final_result(fl_ctx)
-            if target_name:
-                task = Task(
-                    name=self.submit_result_task_name,
-                    data=shareable,
-                    timeout=self.submit_result_task_timeout,
-                    result_received_cb=self._process_final_result,
-                )
-
-                self.log_info(
-                    fl_ctx, f"sending task {self.submit_result_task_name} to client {target_name} for final result"
-                )
-
-                self.send_and_wait(
-                    task=task,
-                    targets=[target_name],
-                    fl_ctx=fl_ctx,
-                    abort_signal=abort_signal,
-                )
-
-                if task.completion_status != TaskCompletionStatus.OK:
-                    self.log_error(
-                        fl_ctx,
-                        f"failed to get final result from client {target_name}: {task.completion_status}",
-                    )
-            else:
-                self.log_warning(fl_ctx, "no client selected for final result")
 
         # ask all clients to end the workflow
         self.log_info(fl_ctx, f"asking all clients to end workflow {self.workflow_id}")
@@ -307,39 +232,6 @@ class ServerSideController(Controller):
         self._update_client_status(fl_ctx)
         return super().process_task_request(client, fl_ctx)
 
-    def select_final_result(self, fl_ctx: FLContext) -> (str, Shareable):
-        best_client = None
-        overall_best_metric = 0.0
-        last_client = None
-        for c, cs in self.client_statuses.items():
-            assert isinstance(cs, ClientStatus)
-
-            s = cs.status
-            if s:
-                assert isinstance(s, StatusReport)
-                if s.all_done:
-                    last_client = c
-
-                if s.best_metric:
-                    # it contains the best metrics from this client
-                    if overall_best_metric < s.best_metric:
-                        overall_best_metric = s.best_metric
-                        best_client = c
-
-        shareable = Shareable()
-
-        if best_client:
-            self.log_info(fl_ctx, f"client {best_client} has best metric {overall_best_metric}")
-            shareable.set_header(Constant.RESULT_TYPE, "best")
-            return best_client, shareable
-        elif last_client:
-            self.log_info(fl_ctx, f"no best_client, use last client {last_client}")
-            shareable.set_header(Constant.RESULT_TYPE, "last")
-            return last_client, shareable
-
-        self.log_error(fl_ctx, "cannot select client for final result")
-        return "", None
-
     def _process_configure_reply(self, client_task: ClientTask, fl_ctx: FLContext):
         result = client_task.result
         client_name = client_task.client.name
@@ -366,19 +258,6 @@ class ServerSideController(Controller):
         else:
             error = result.get(Constant.ERROR, "?")
             self.log_error(fl_ctx, f"client {client_task.client.name} couldn't start workflow: {rc}: {error}")
-
-    def _process_final_result(self, client_task: ClientTask, fl_ctx: FLContext):
-        result = client_task.result
-        assert isinstance(result, Shareable)
-        rc = result.get_return_code()
-        if rc == ReturnCode.OK:
-            self.log_info(fl_ctx, f"Got final result from client {client_task.client.name}")
-            if self.shareable_generator:
-                self._last_learnable = self.shareable_generator.shareable_to_learnable(result, fl_ctx)
-            else:
-                self._last_learnable = shareable_to_learnable(result)
-        else:
-            self.log_error(fl_ctx, f"client {client_task.client.name} couldn't submit final reason: {rc}")
 
     def _check_job_status(self, fl_ctx: FLContext):
         now = time.time()
@@ -443,12 +322,11 @@ class ServerSideController(Controller):
             # updated
             cs.status = report
             cs.last_progress_time = now
-            started = datetime.fromtimestamp(report.start_time) if report.start_time else False
-            ended = datetime.fromtimestamp(report.end_time) if report.end_time else False
+            timestamp = datetime.fromtimestamp(report.timestamp) if report.timestamp else False
             self.log_info(
                 fl_ctx,
                 f"updated status of client {client_name} on round {report.last_round}: "
-                f"started={started}, ended={ended}, metric={report.best_metric}",
+                f"timestamp={timestamp}, action={report.action}, all_done={report.all_done}",
             )
         else:
             self.log_info(
@@ -458,9 +336,7 @@ class ServerSideController(Controller):
     def process_result_of_unknown_task(
         self, client: Client, task_name: str, client_task_id: str, result: Shareable, fl_ctx: FLContext
     ):
-        pass
+        self.log_warning(fl_ctx, f"ignored unknown task {task_name} from client {client.name}")
 
     def stop_controller(self, fl_ctx: FLContext):
-        if self._last_learnable:
-            self.persistor.save(learnable=self._last_learnable, fl_ctx=fl_ctx)
-        self.log_debug(fl_ctx, "controller stopped")
+        pass

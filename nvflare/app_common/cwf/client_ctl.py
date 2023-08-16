@@ -22,9 +22,12 @@ from nvflare.apis.fl_constant import FLContextKey, ReturnCode
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import Shareable, make_reply
 from nvflare.apis.signal import Signal
+from nvflare.app_common.abstract.learnable import Learnable
+from nvflare.app_common.abstract.learnable_persistor import LearnablePersistor
+from nvflare.app_common.abstract.shareable_generator import ShareableGenerator
 from nvflare.app_common.app_constant import AppConstants
 from nvflare.app_common.app_event_type import AppEventType
-from nvflare.app_common.cwf.common import Constant, StatusReport, topic_for_end_workflow
+from nvflare.app_common.cwf.common import Constant, StatusReport, learnable_to_shareable, topic_for_end_workflow
 from nvflare.security.logging import secure_format_traceback
 
 
@@ -41,13 +44,14 @@ class ClientSideController(Executor):
         self,
         start_task_name=Constant.TASK_NAME_START,
         configure_task_name=Constant.TASK_NAME_START,
-        submit_result_task_name=Constant.TASK_NAME_SUBMIT_RESULT,
         learn_task_name=AppConstants.TASK_TRAIN,
+        persistor_id="persistor",
+        shareable_generator_id="shareable_generator",
         max_status_report_interval: float = 600.0,
         learn_task_check_interval: float = 1.0,
         learn_task_send_timeout: float = 10.0,
         learn_task_abort_timeout: float = 5.0,
-        report_status_check_interval: float = 0.5,
+        final_result_send_timeout: float = 10.0,
         allow_busy_task: bool = False,
     ):
         """
@@ -56,28 +60,33 @@ class ClientSideController(Executor):
         Args:
             start_task_name: task name for starting the workflow
             configure_task_name: task name for getting workflow config properties
-            submit_result_task_name: task name for submitting the final result
             learn_task_name: name for the Learning Task (LT)
             max_status_report_interval: max interval between status reports to the server
             learn_task_check_interval: interval for checking incoming Learning Task (LT)
             learn_task_send_timeout: timeout for sending the LT to other client(s)
+            final_result_send_timeout: timeout for sending final result to participating clients
             learn_task_abort_timeout: time to wait for the LT to become stopped after aborting it
-            report_status_check_interval: interval for checking and sending status report
             allow_busy_task:
         """
         super().__init__()
         self.start_task_name = start_task_name
         self.configure_task_name = configure_task_name
-        self.submit_result_task_name = submit_result_task_name
         self.learn_task_name = learn_task_name
         self.max_status_report_interval = max_status_report_interval
-        self.report_status_check_interval = report_status_check_interval
         self.learn_task_abort_timeout = learn_task_abort_timeout
         self.learn_task_check_interval = learn_task_check_interval
         self.learn_task_send_timeout = learn_task_send_timeout
+        self.final_result_send_timeout = final_result_send_timeout
         self.allow_busy_task = allow_busy_task
+        self.persistor_id = persistor_id
+        self.shareable_generator_id = shareable_generator_id
+
+        self.persistor = None
+        self.shareable_generator = None
+
         self.current_status = StatusReport()
         self.learn_error = None
+        self.all_done = False
         self.last_status_report_time = time.time()  # time of last status report to server
         self.status_change_time = 0  # time of last status change
         self.config = None
@@ -96,6 +105,7 @@ class ClientSideController(Executor):
         self.me = None
         self.is_starting_client = False
         self.last_result = None
+        self.last_round = None
         self.best_result = None
         self.best_metric = None
         self.best_round = 0
@@ -133,6 +143,25 @@ class ClientSideController(Executor):
             if not self.learn_executor:
                 self.system_panic(f"no executor for task {self.learn_task_name}", fl_ctx)
                 return
+
+            engine = fl_ctx.get_engine()
+            self.persistor = engine.get_component(self.persistor_id)
+            if not isinstance(self.persistor, LearnablePersistor):
+                self.system_panic(
+                    f"Persistor {self.persistor_id} must be a Persistor instance, but got {type(self.persistor)}",
+                    fl_ctx,
+                )
+                return
+
+            if self.shareable_generator_id:
+                self.shareable_generator = engine.get_component(self.shareable_generator_id)
+                if not isinstance(self.shareable_generator, ShareableGenerator):
+                    self.system_panic(
+                        f"Shareable generator {self.shareable_generator_id} must be a Shareable Generator instance, "
+                        f"but got {type(self.shareable_generator)}",
+                        fl_ctx,
+                    )
+                    return
 
             self.initialize(fl_ctx)
             self.log_info(fl_ctx, "Started learn thread")
@@ -202,6 +231,51 @@ class ClientSideController(Executor):
     def topic_for_my_workflow(self, base_topic: str):
         return f"{base_topic}.{self.workflow_id}"
 
+    def broadcast_final_result(self, result: Learnable, fl_ctx: FLContext, best_metric=None, best_round=None):
+        targets = self.get_config_prop(Constant.CLIENTS)
+        self.log_info(fl_ctx, f"broadcasting final result to clients {targets}")
+
+        shareable = Shareable()
+        if best_metric is not None:
+            shareable.set_header(Constant.BEST_METRIC, best_metric)
+        if best_round is not None:
+            shareable.set_header(Constant.BEST_ROUND, best_round)
+
+        shareable[Constant.FINAL_RESULT] = result
+
+        now = time.time()
+        self.update_status(StatusReport(timestamp=now, action="broadcast_final_result"), now)
+
+        resp = self.engine.send_aux_request(
+            targets=targets,
+            topic=self.topic_for_my_workflow(Constant.TOPIC_FINAL_RESULT),
+            request=shareable,
+            timeout=self.final_result_send_timeout,
+            fl_ctx=fl_ctx,
+        )
+
+        assert isinstance(resp, dict)
+        num_errors = 0
+        for t in targets:
+            reply = resp.get(t)
+            if not isinstance(reply, Shareable):
+                self.log_error(fl_ctx, f"failed to send final result to client {t}")
+                self.log_error(fl_ctx, f"reply must be Shareable but got {type(reply)}")
+                num_errors += 1
+                continue
+
+            rc = reply.get_return_code(ReturnCode.OK)
+            if rc != ReturnCode.OK:
+                self.log_error(fl_ctx, f"bad response for final result from client {t}: {rc}")
+                num_errors += 1
+        if num_errors == 0:
+            self.log_info(fl_ctx, f"successfully broadcast final result to {targets}")
+
+        now = time.time()
+        self.update_status(StatusReport(timestamp=now, action="finished_broadcast_final_result"), now)
+
+        return num_errors
+
     def execute(self, task_name: str, shareable: Shareable, fl_ctx: FLContext, abort_signal: Signal) -> Shareable:
         if task_name == self.configure_task_name:
             self.config = shareable[Constant.CONFIG]
@@ -220,39 +294,33 @@ class ClientSideController(Executor):
             )
 
             self.engine.register_aux_message_handler(
-                topic=self.topic_for_my_workflow(Constant.TOPIC_LEARN), message_handle_func=self._process_learn_request
+                topic=self.topic_for_my_workflow(Constant.TOPIC_LEARN),
+                message_handle_func=self._process_learn_request,
+            )
+
+            self.engine.register_aux_message_handler(
+                topic=self.topic_for_my_workflow(Constant.TOPIC_FINAL_RESULT),
+                message_handle_func=self._process_final_result,
             )
 
             return make_reply(ReturnCode.OK)
 
-        if task_name == self.start_task_name:
+        elif task_name == self.start_task_name:
             self.is_starting_client = True
-            return self.start_workflow(shareable, fl_ctx, abort_signal)
 
-        if task_name == self.submit_result_task_name:
-            self.log_info(fl_ctx, "Submitting my result")
-            result = self.prepare_final_result(fl_ctx)
-            if not result:
-                self.log_error(fl_ctx, "got request to submit result but I have no result to submit!")
-                return make_reply(ReturnCode.BAD_REQUEST_DATA)
-            result.set_return_code(ReturnCode.OK)
-            return result
+            learnable = self.persistor.load(fl_ctx)
+            fl_ctx.set_prop(AppConstants.GLOBAL_MODEL, learnable, private=True, sticky=True)
+
+            if self.shareable_generator:
+                initial_model = self.shareable_generator.learnable_to_shareable(learnable, fl_ctx)
+            else:
+                initial_model = learnable_to_shareable(learnable)
+
+            return self.start_workflow(initial_model, fl_ctx, abort_signal)
+
         else:
             self.log_error(fl_ctx, f"Could not handle task: {task_name}")
             return make_reply(ReturnCode.TASK_UNKNOWN)
-
-    def prepare_final_result(self, fl_ctx: FLContext) -> Shareable:
-        """
-        This is called to allow the subclass to prepare the final result before submitting it to server.
-        If the subclass does not overwrite this method, the current last_result will be returned.
-
-        Args:
-            fl_ctx: the FL Context
-
-        Returns: a Shareable object to be returned as the final result.
-
-        """
-        return self.last_result
 
     @abstractmethod
     def start_workflow(self, shareable: Shareable, fl_ctx: FLContext, abort_signal: Signal) -> Shareable:
@@ -342,7 +410,11 @@ class ClientSideController(Executor):
 
     def update_status(self, status: StatusReport, timestamp: float):
         with self.status_lock:
-            status.best_metric = self.best_metric
+            if self.all_done:
+                # once marked all_done, always all_done!
+                status.all_done = True
+            if status.all_done:
+                self.all_done = True
             self.current_status = status
             self.status_change_time = timestamp
 
@@ -366,6 +438,32 @@ class ClientSideController(Executor):
 
         """
         pass
+
+    def _process_final_result(self, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
+        peer_ctx = fl_ctx.get_peer_context()
+        assert isinstance(peer_ctx, FLContext)
+        client_name = peer_ctx.get_identity_name()
+        result = request.get(Constant.FINAL_RESULT)
+        best_metric = request.get_header(Constant.BEST_METRIC)
+        best_round = request.get_header(Constant.BEST_ROUND)
+        if not result:
+            self.log_error(fl_ctx, f"Bad request from client {client_name}: no result")
+            return make_reply(ReturnCode.BAD_REQUEST_DATA)
+
+        if not isinstance(result, Learnable):
+            self.log_error(fl_ctx, f"Bad result from client {client_name}: expect Learnable but got {type(result)}")
+            return make_reply(ReturnCode.BAD_REQUEST_DATA)
+
+        self.log_info(
+            fl_ctx, f"Got final result from client {client_name} with best metric {best_metric} at round {best_round}"
+        )
+
+        fl_ctx.set_prop(AppConstants.GLOBAL_MODEL, result, private=True, sticky=True)
+
+        if self.persistor:
+            assert isinstance(self.persistor, LearnablePersistor)
+            self.persistor.save(result, fl_ctx)
+        return make_reply(ReturnCode.OK)
 
     def _process_end_workflow(self, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
         self.log_info(fl_ctx, f"ending workflow {self.get_config_prop(FLContextKey.WORKFLOW)}")

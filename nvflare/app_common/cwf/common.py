@@ -18,32 +18,33 @@ from nvflare.app_common.abstract.learnable import Learnable
 
 class Constant:
 
-    TASK_NAME_CONFIGURE = "configure"
-    TASK_NAME_START = "start"
-    TASK_NAME_SUBMIT_RESULT = "submit_result"
+    TASK_NAME_CONFIGURE = "wf_config"
+    TASK_NAME_START = "wf_start"
 
-    ERROR = "cw.error"
-    ORDER = "cw.order"
-    CLIENTS = "cw.clients"
-    CLIENT_ORDER = "cw.client_order"
-    LAST_ROUND = "cw.last_round"
-    START_ROUND = "cw.start_round"
-    START_TIME = "cw.start_time"
-    END_TIME = "cw.end_time"
-    LAST_RESULT = "cw.last_result"
-    RESULT_TYPE = "cw.result_type"
-    ALL_DONE = "cw.all_done"
-    AGGR_CLIENTS = "cw.aggr_clients"
-    TRAIN_CLIENTS = "cw.train_clients"
-    AGGREGATOR = "cw.aggr"
-    BEST_METRIC = "cw.best_metric"
-    CONFIG = "cw.config"
-    STATUS_REPORTS = "cw.status_reports"
+    ERROR = "cwf.error"
+    ORDER = "cwf.order"
+    CLIENTS = "cwf.clients"
+    CLIENT_ORDER = "cwf.client_order"
+    LAST_ROUND = "cwf.last_round"
+    START_ROUND = "cwf.start_round"
+    TIMESTAMP = "cwf.timestamp"
+    ACTION = "cwf.action"
+    ALL_DONE = "cwf.all_done"
+    AGGR_CLIENTS = "cwf.aggr_clients"
+    TRAIN_CLIENTS = "cwf.train_clients"
+    AGGREGATOR = "cwf.aggr"
+    BEST_METRIC = "cwf.best_metric"
+    BEST_CLIENT = "cwf.best_client"
+    BEST_ROUND = "cwf.best_round"
+    CONFIG = "cwf.config"
+    STATUS_REPORTS = "cwf.status_reports"
+    FINAL_RESULT = "cwf.final_result"
 
-    TOPIC_REPORT_STATUS = "cw.report_status"
-    TOPIC_LEARN = "cw.learn"
-    TOPIC_RESULT = "cw.result"
-    TOPIC_END_WORKFLOW = "cw.end_wf"
+    TOPIC_LEARN = "cwf.learn"
+    TOPIC_RESULT = "cwf.result"
+    TOPIC_FINAL_RESULT = "cwf.final_result"
+    TOPIC_SHARE_RESULT = "cwf.share_result"
+    TOPIC_END_WORKFLOW = "cwf.end_wf"
 
 
 class RROrder:
@@ -55,32 +56,28 @@ class RROrder:
 class StatusReport:
     def __init__(
         self,
-        last_round=-1,
-        start_time=None,
-        end_time=None,
-        best_metric=None,
+        timestamp=None,
+        action: str = "",
+        last_round=None,
         all_done=False,
         error: str = "",
     ):
+        self.timestamp = timestamp
+        self.action = action
         self.last_round = last_round
-        self.start_time = start_time
-        self.end_time = end_time
-        self.best_metric = best_metric
         self.all_done = all_done
         self.error = error
 
     def to_dict(self) -> dict:
         result = {
-            Constant.LAST_ROUND: self.last_round,
+            Constant.TIMESTAMP: self.timestamp,
+            Constant.ACTION: self.action,
             Constant.ALL_DONE: self.all_done,
         }
 
-        if self.start_time:
-            result[Constant.START_TIME] = self.start_time
-        if self.end_time:
-            result[Constant.END_TIME] = self.end_time
-        if self.best_metric:
-            result[Constant.BEST_METRIC] = self.best_metric
+        if self.last_round is not None:
+            result[Constant.LAST_ROUND] = self.last_round
+
         if self.error:
             result[Constant.ERROR] = self.error
         return result
@@ -92,29 +89,24 @@ class StatusReport:
 
         return (
             self.last_round == other.last_round
-            and self.start_time == other.start_time
-            and self.end_time == other.end_time
+            and self.timestamp == other.timestamp
+            and self.action == other.action
             and self.all_done == other.all_done
-            and self.best_metric == other.best_metric
             and self.error == other.error
         )
 
 
 def status_report_from_dict(d: dict) -> StatusReport:
     last_round = d.get(Constant.LAST_ROUND)
-    if last_round is None:
-        raise ValueError(f"missing {Constant.LAST_ROUND} in status report")
-    start_time = d.get(Constant.START_TIME)
-    end_time = d.get(Constant.END_TIME)
+    timestamp = d.get(Constant.TIMESTAMP)
     all_done = d.get(Constant.ALL_DONE)
-    best_metric = d.get(Constant.BEST_METRIC)
     error = d.get(Constant.ERROR)
+    action = d.get(Constant.ACTION)
 
     return StatusReport(
         last_round=last_round,
-        start_time=start_time,
-        end_time=end_time,
-        best_metric=best_metric,
+        timestamp=timestamp,
+        action=action,
         all_done=all_done,
         error=error,
     )

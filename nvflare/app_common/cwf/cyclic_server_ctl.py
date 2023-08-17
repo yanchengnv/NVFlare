@@ -27,6 +27,7 @@ class CyclicServerController(ServerSideController):
         task_check_period: float = 0.5,
         job_status_check_interval: float = 2.0,
         participating_clients=None,
+        result_clients=None,
         starting_client: str = None,
         max_status_report_interval: float = 3600.0,
         rr_order: str = RROrder.FIXED,
@@ -40,6 +41,7 @@ class CyclicServerController(ServerSideController):
             task_check_period=task_check_period,
             job_status_check_interval=job_status_check_interval,
             participating_clients=participating_clients,
+            result_clients=result_clients,
             starting_client=starting_client,
             max_status_report_interval=max_status_report_interval,
         )

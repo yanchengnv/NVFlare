@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import random
-import time
 
 from nvflare.apis.fl_constant import ReturnCode
 from nvflare.apis.fl_context import FLContext
@@ -20,7 +19,7 @@ from nvflare.apis.shareable import Shareable, make_reply
 from nvflare.apis.signal import Signal
 from nvflare.app_common.app_constant import AppConstants
 from nvflare.app_common.cwf.client_ctl import ClientSideController
-from nvflare.app_common.cwf.common import Constant, RROrder, StatusReport, rotate_to_front
+from nvflare.app_common.cwf.common import Constant, ResultType, RROrder, rotate_to_front
 
 
 class CyclicClientController(ClientSideController):
@@ -65,9 +64,9 @@ class CyclicClientController(ClientSideController):
     def do_learn_task(self, name: str, data: Shareable, fl_ctx: FLContext, abort_signal: Signal):
         # set status report of starting task
         current_round = data.get_header(AppConstants.CURRENT_ROUND)
-        start_time = time.time()
         self.update_status(
-            StatusReport(last_round=current_round, action="start_learn_task", timestamp=start_time), start_time
+            last_round=current_round,
+            action="start_learn_task",
         )
 
         # execute the task
@@ -76,14 +75,13 @@ class CyclicClientController(ClientSideController):
         rc = result.get_return_code(ReturnCode.OK)
         if rc != ReturnCode.OK:
             self.log_error(fl_ctx, f"learn executor failed: {rc}")
-            self.set_error(rc)
+            self.update_status(action="do_learn_task", error=rc)
             return
 
         self.last_result = result
         self.last_round = current_round
 
         # see whether we need to send to next leg
-        end_time = time.time()
         num_rounds = data.get_header(AppConstants.NUM_ROUNDS)
         current_round = data.get_header(AppConstants.CURRENT_ROUND)
         client_order = data.get_header(Constant.CLIENT_ORDER)
@@ -101,7 +99,7 @@ class CyclicClientController(ClientSideController):
             num_rounds_done = current_round - self.get_config_prop(Constant.START_ROUND, 0) + 1
             if num_rounds_done >= num_rounds:
                 # The RR is done!
-                self.log_info(fl_ctx, f"Round Robin Done: number of rounds completed {num_rounds_done}")
+                self.log_info(fl_ctx, f"Cyclic Done: number of rounds completed {num_rounds_done}")
                 all_done = True
             else:
                 # decide the next round order
@@ -121,20 +119,8 @@ class CyclicClientController(ClientSideController):
 
         if all_done:
             learnable = self.shareable_generator.shareable_to_learnable(result, fl_ctx)
-            self.broadcast_final_result(learnable, fl_ctx, best_round=self.last_round)
-
-        # update status
-        self.update_status(
-            status=StatusReport(
-                last_round=current_round,
-                timestamp=end_time,
-                action="finished_learn_task",
-                all_done=all_done,
-            ),
-            timestamp=end_time,
-        )
-
-        if all_done:
+            self.record_last_result(fl_ctx, self.last_round, learnable)
+            self.broadcast_final_result(fl_ctx, ResultType.LAST, learnable, round_num=self.last_round)
             return
 
         # send to next leg

@@ -27,7 +27,13 @@ from nvflare.app_common.abstract.learnable_persistor import LearnablePersistor
 from nvflare.app_common.abstract.shareable_generator import ShareableGenerator
 from nvflare.app_common.app_constant import AppConstants
 from nvflare.app_common.app_event_type import AppEventType
-from nvflare.app_common.cwf.common import Constant, StatusReport, learnable_to_shareable, topic_for_end_workflow
+from nvflare.app_common.cwf.common import (
+    Constant,
+    ResultType,
+    StatusReport,
+    learnable_to_shareable,
+    topic_for_end_workflow,
+)
 from nvflare.security.logging import secure_format_traceback
 
 
@@ -85,10 +91,7 @@ class ClientSideController(Executor):
         self.shareable_generator = None
 
         self.current_status = StatusReport()
-        self.learn_error = None
-        self.all_done = False
         self.last_status_report_time = time.time()  # time of last status report to server
-        self.status_change_time = 0  # time of last status change
         self.config = None
         self.workflow_id = None
         self.finalize_lock = threading.Lock()
@@ -175,6 +178,7 @@ class ClientSideController(Executor):
                 self.log_info(fl_ctx, "nothing to report this time")
                 return
             self._add_status_report(report, fl_ctx)
+            self.last_status_report_time = time.time()
 
         elif event_type in [EventType.ABORT_TASK, EventType.END_RUN]:
             if not self.asked_to_stop and not self.workflow_done:
@@ -231,20 +235,56 @@ class ClientSideController(Executor):
     def topic_for_my_workflow(self, base_topic: str):
         return f"{base_topic}.{self.workflow_id}"
 
-    def broadcast_final_result(self, result: Learnable, fl_ctx: FLContext, best_metric=None, best_round=None):
-        targets = self.get_config_prop(Constant.CLIENTS)
-        self.log_info(fl_ctx, f"broadcasting final result to clients {targets}")
+    def broadcast_final_result(
+        self, fl_ctx: FLContext, result_type: str, result: Learnable, metric=None, round_num=None
+    ):
+        error = None
+        try:
+            num_errors = self._try_broadcast_final_result(fl_ctx, result_type, result, metric, round_num)
+            if num_errors > 0:
+                error = ReturnCode.EXECUTION_EXCEPTION
+        except:
+            self.log_error(fl_ctx, f"exception broadcast_final_result {secure_format_traceback()}")
+            error = ReturnCode.EXECUTION_EXCEPTION
+        finally:
+            if result_type == ResultType.BEST:
+                action = "finished_broadcast_best_result"
+                all_done = False
+            else:
+                action = "finished_broadcast_last_result"
+                all_done = True
+
+            self.update_status(action=action, error=error, all_done=all_done)
+
+    def _try_broadcast_final_result(
+        self, fl_ctx: FLContext, result_type: str, result: Learnable, metric=None, round_num=None
+    ):
+        targets = self.get_config_prop(Constant.RESULT_CLIENTS)
+        if not targets:
+            targets = self.get_config_prop(Constant.CLIENTS)
+
+        assert isinstance(targets, list)
+        if self.me in targets:
+            targets.remove(self.me)
+
+        if len(targets) == 0:
+            # no targets to receive the result!
+            self.log_info(fl_ctx, f"no targets to receive {result_type} result")
+            return 0
 
         shareable = Shareable()
-        if best_metric is not None:
-            shareable.set_header(Constant.BEST_METRIC, best_metric)
-        if best_round is not None:
-            shareable.set_header(Constant.BEST_ROUND, best_round)
+        shareable.set_header(Constant.RESULT_TYPE, result_type)
+        if metric is not None:
+            shareable.set_header(Constant.METRIC, metric)
+        if round_num is not None:
+            shareable.set_header(Constant.ROUND, round_num)
+        shareable[Constant.RESULT] = result
 
-        shareable[Constant.FINAL_RESULT] = result
+        self.log_info(
+            fl_ctx, f"broadcasting {result_type} result with metric {metric} at round {round_num} to clients {targets}"
+        )
 
-        now = time.time()
-        self.update_status(StatusReport(timestamp=now, action="broadcast_final_result"), now)
+        self.update_status(action=f"broadcast_{result_type}_result")
 
         resp = self.engine.send_aux_request(
             targets=targets,
@@ -259,21 +299,17 @@ class ClientSideController(Executor):
         for t in targets:
             reply = resp.get(t)
             if not isinstance(reply, Shareable):
-                self.log_error(fl_ctx, f"failed to send final result to client {t}")
+                self.log_error(fl_ctx, f"failed to send {result_type} result to client {t}")
                 self.log_error(fl_ctx, f"reply must be Shareable but got {type(reply)}")
                 num_errors += 1
                 continue
 
             rc = reply.get_return_code(ReturnCode.OK)
             if rc != ReturnCode.OK:
-                self.log_error(fl_ctx, f"bad response for final result from client {t}: {rc}")
+                self.log_error(fl_ctx, f"bad response for {result_type} result from client {t}: {rc}")
                 num_errors += 1
         if num_errors == 0:
-            self.log_info(fl_ctx, f"successfully broadcast final result to {targets}")
-
-        now = time.time()
-        self.update_status(StatusReport(timestamp=now, action="finished_broadcast_final_result"), now)
-
+            self.log_info(fl_ctx, f"successfully broadcast {result_type} result to {targets}")
         return num_errors
 
     def execute(self, task_name: str, shareable: Shareable, fl_ctx: FLContext, abort_signal: Signal) -> Shareable:
@@ -340,11 +376,12 @@ class ClientSideController(Executor):
 
     def _get_status_report(self):
         with self.status_lock:
+            status = self.current_status
             must_report = False
             now = time.time()
-            if self.learn_error:
+            if status.error:
                 must_report = True
-            elif self.status_change_time > self.last_status_report_time:
+            elif status.timestamp and status.timestamp > self.last_status_report_time:
                 # status has changed since last reported:
                 must_report = True
             elif now - self.last_status_report_time > self.max_status_report_interval:
@@ -355,9 +392,7 @@ class ClientSideController(Executor):
                 return None
 
             # do status report
-            report = copy.copy(self.current_status)
-            if self.learn_error:
-                report.error = self.learn_error
+            report = copy.copy(status)
             return report
 
     def _abort_current_task(self, fl_ctx: FLContext):
@@ -408,20 +443,21 @@ class ClientSideController(Executor):
                 self.learn_task = None
             time.sleep(self.learn_task_check_interval)
 
-    def update_status(self, status: StatusReport, timestamp: float):
+    def update_status(self, last_round=None, action=None, error=None, all_done=False):
         with self.status_lock:
-            if self.all_done:
+            status = self.current_status
+            status.timestamp = time.time()
+            if all_done:
                 # once marked all_done, always all_done!
                 status.all_done = True
-            if status.all_done:
-                self.all_done = True
-            self.current_status = status
-            self.status_change_time = timestamp
-
-    def set_error(self, err: str):
-        with self.status_lock:
-            self.learn_error = err
-            self.status_change_time = time.time()
+            if error:
+                status.error = error
+            if action:
+                status.action = action
+            if status.last_round is None:
+                status.last_round = last_round
+            elif last_round is not None and last_round > status.last_round:
+                status.last_round = last_round
 
     @abstractmethod
     def do_learn_task(self, name: str, data: Shareable, fl_ctx: FLContext, abort_signal: Signal):
@@ -443,9 +479,15 @@ class ClientSideController(Executor):
         peer_ctx = fl_ctx.get_peer_context()
         assert isinstance(peer_ctx, FLContext)
         client_name = peer_ctx.get_identity_name()
-        result = request.get(Constant.FINAL_RESULT)
-        best_metric = request.get_header(Constant.BEST_METRIC)
-        best_round = request.get_header(Constant.BEST_ROUND)
+        result = request.get(Constant.RESULT)
+        metric = request.get_header(Constant.METRIC)
+        round_num = request.get_header(Constant.ROUND)
+        result_type = request.get_header(Constant.RESULT_TYPE)
+
+        if result_type not in [ResultType.BEST, ResultType.LAST]:
+            self.log_error(fl_ctx, f"Bad request from client {client_name}: invalid result type {result_type}")
+            return make_reply(ReturnCode.BAD_REQUEST_DATA)
+
         if not result:
             self.log_error(fl_ctx, f"Bad request from client {client_name}: no result")
             return make_reply(ReturnCode.BAD_REQUEST_DATA)
@@ -454,13 +496,17 @@ class ClientSideController(Executor):
             self.log_error(fl_ctx, f"Bad result from client {client_name}: expect Learnable but got {type(result)}")
             return make_reply(ReturnCode.BAD_REQUEST_DATA)
 
-        self.log_info(
-            fl_ctx, f"Got final result from client {client_name} with best metric {best_metric} at round {best_round}"
-        )
+        self.log_info(fl_ctx, f"Got {result_type} from client {client_name} with metric {metric} at round {round_num}")
 
         fl_ctx.set_prop(AppConstants.GLOBAL_MODEL, result, private=True, sticky=True)
 
-        if self.persistor:
+        if result_type == ResultType.BEST:
+            fl_ctx.set_prop(Constant.ROUND, round_num, private=True, sticky=False)
+            fl_ctx.set_prop(Constant.CLIENT, client_name, private=True, sticky=False)
+            fl_ctx.set_prop(AppConstants.VALIDATION_RESULT, metric, private=True, sticky=False)
+            self.fire_event(AppEventType.GLOBAL_BEST_MODEL_AVAILABLE, fl_ctx)
+        else:
+            # last model
             assert isinstance(self.persistor, LearnablePersistor)
             self.persistor.save(result, fl_ctx)
         return make_reply(ReturnCode.OK)
@@ -477,7 +523,7 @@ class ClientSideController(Executor):
             return self._try_process_learn_request(topic, request, fl_ctx)
         except Exception as ex:
             self.log_exception(fl_ctx, f"exception: {ex}")
-            self.set_error(ReturnCode.EXECUTION_EXCEPTION)
+            self.update_status(action="process_learn_request", error=ReturnCode.EXECUTION_EXCEPTION)
             return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
     def _try_process_learn_request(self, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
@@ -491,7 +537,7 @@ class ClientSideController(Executor):
         if self.learn_task and not self.allow_busy_task:
             # should never happen!
             self.log_error(fl_ctx, f"got Learn request from {sender} while I'm still busy!")
-            self.set_error(ReturnCode.EXECUTION_EXCEPTION)
+            self.update_status(action="process_learn_request", error=ReturnCode.EXECUTION_EXCEPTION)
             return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
         self.log_info(fl_ctx, f"accepted learn request from {sender}")
@@ -516,13 +562,13 @@ class ClientSideController(Executor):
             if not isinstance(reply, Shareable):
                 self.log_error(fl_ctx, f"failed to send learn request to client {t}")
                 self.log_error(fl_ctx, f"reply must be Shareable but got {type(reply)}")
-                self.set_error(ReturnCode.EXECUTION_EXCEPTION)
+                self.update_status(action="send_learn_task", error=ReturnCode.EXECUTION_EXCEPTION)
                 return False
 
             rc = reply.get_return_code(ReturnCode.OK)
             if rc != ReturnCode.OK:
                 self.log_error(fl_ctx, f"bad response for learn request from client {t}: {rc}")
-                self.set_error(rc)
+                self.update_status(action="send_learn_task", error=rc)
                 return False
         return True
 
@@ -543,3 +589,20 @@ class ClientSideController(Executor):
         result.set_header(AppConstants.CURRENT_ROUND, current_round)
         result.add_cookie(AppConstants.CONTRIBUTION_ROUND, current_round)  # to make model selector happy
         return result
+
+    def record_last_result(
+        self,
+        fl_ctx: FLContext,
+        round_num: int,
+        result: Learnable,
+    ):
+        if not isinstance(result, Learnable):
+            self.log_error(fl_ctx, f"result must be Learnable but got {type(result)}")
+            return
+
+        self.last_result = result
+        self.last_round = round_num
+        fl_ctx.set_prop(AppConstants.GLOBAL_MODEL, result, private=True, sticky=True)
+        if self.persistor:
+            self.log_info(fl_ctx, f"Saving result of round {round_num}")
+            self.persistor.save(result, fl_ctx)

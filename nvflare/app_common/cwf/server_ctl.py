@@ -48,10 +48,31 @@ class ServerSideController(Controller):
         job_status_check_interval: float = 2.0,
         starting_client: str = None,
         participating_clients=None,
+        result_clients=None,
         max_status_report_interval: float = 3600.0,
         client_ready_timeout: float = 60.0,
         progress_timeout: float = 3600,
     ):
+        """
+        Constructor
+
+        Args:
+            num_rounds:
+            start_round:
+            configure_task_name:
+            configure_task_timeout:
+            end_workflow_timeout:
+            start_task_name:
+            start_task_timeout:
+            task_check_period:
+            job_status_check_interval:
+            starting_client:
+            participating_clients:
+            result_clients: clients to receive final results
+            max_status_report_interval:
+            client_ready_timeout:
+            progress_timeout:
+        """
         Controller.__init__(self, task_check_period)
         self.configure_task_name = configure_task_name
         self.configure_task_timeout = configure_task_timeout
@@ -66,6 +87,7 @@ class ServerSideController(Controller):
         self.job_status_check_interval = job_status_check_interval
         self.starting_client = starting_client
         self.participating_clients = participating_clients
+        self.result_clients = result_clients
         self.client_statuses = {}  # client name => ClientStatus
         self.cw_started = False
         self.asked_to_stop = False
@@ -102,6 +124,13 @@ class ServerSideController(Controller):
         elif self.starting_client not in self.participating_clients:
             raise RuntimeError(f"Configured starting client {self.starting_client} is invalid")
 
+        if self.result_clients:
+            for c in self.result_clients:
+                if c not in self.participating_clients:
+                    raise RuntimeError(f"Configured result client {c} is invalid")
+        else:
+            self.result_clients = []
+
         for c in self.participating_clients:
             self.client_statuses[c] = ClientStatus()
 
@@ -117,6 +146,7 @@ class ServerSideController(Controller):
 
         learn_config = {
             Constant.CLIENTS: self.participating_clients,
+            Constant.RESULT_CLIENTS: self.result_clients,
             AppConstants.NUM_ROUNDS: self.num_rounds,
             Constant.START_ROUND: self.start_round,
             FLContextKey.WORKFLOW: self.workflow_id,
@@ -261,7 +291,7 @@ class ServerSideController(Controller):
 
     def _check_job_status(self, fl_ctx: FLContext):
         now = time.time()
-        overall_last_progress_time = 0
+        overall_last_progress_time = 0.0
         for client_name, cs in self.client_statuses.items():
             assert isinstance(cs, ClientStatus)
             assert isinstance(cs.status, StatusReport)
@@ -330,7 +360,7 @@ class ServerSideController(Controller):
             )
         else:
             self.log_info(
-                fl_ctx, f"ignored status report from client {client_name} on round {report.last_round}: no change"
+                fl_ctx, f"ignored status report from client {client_name} at round {report.last_round}: no change"
             )
 
     def process_result_of_unknown_task(

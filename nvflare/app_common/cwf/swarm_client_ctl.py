@@ -25,7 +25,7 @@ from nvflare.app_common.abstract.aggregator import Aggregator
 from nvflare.app_common.app_constant import AppConstants
 from nvflare.app_common.app_event_type import AppEventType
 from nvflare.app_common.cwf.client_ctl import ClientSideController
-from nvflare.app_common.cwf.common import Constant, StatusReport
+from nvflare.app_common.cwf.common import Constant, ResultType
 from nvflare.security.logging import secure_format_traceback
 
 
@@ -68,9 +68,9 @@ class Gatherer(FLComponent):
         self.wait_time_after_min_resps_received = wait_time_after_min_resps_received
         self.min_resps_received_time = None
         self.lock = threading.Lock()
-        self.current_best_client = task_data.get_header(Constant.BEST_CLIENT)
-        self.current_best_global_metric = task_data.get_header(Constant.BEST_METRIC)
-        self.current_best_round = task_data.get_header(Constant.BEST_ROUND)
+        self.current_best_client = task_data.get_header(Constant.CLIENT)
+        self.current_best_global_metric = task_data.get_header(Constant.METRIC)
+        self.current_best_round = task_data.get_header(Constant.ROUND)
         self.log_info(
             fl_ctx,
             f"gatherer starting with best client {self.current_best_client} "
@@ -103,7 +103,7 @@ class Gatherer(FLComponent):
                 f"logic error: received result from {client_name} for round {result_round}, "
                 f"which is > gatherer's current round {self.for_round}",
             )
-            self.executor.set_error(ReturnCode.EXECUTION_EXCEPTION)
+            self.executor.update_status(action="gather", error=ReturnCode.EXECUTION_EXCEPTION)
             return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
         if result_round < self.for_round:
@@ -177,9 +177,9 @@ class Gatherer(FLComponent):
 
         self.log_info(fl_ctx, f"global best metric is {best_metric} from client {best_client} at round {best_round}")
 
-        aggr_result.set_header(Constant.BEST_ROUND, best_round)
-        aggr_result.set_header(Constant.BEST_METRIC, best_metric)
-        aggr_result.set_header(Constant.BEST_CLIENT, best_client)
+        aggr_result.set_header(Constant.ROUND, best_round)
+        aggr_result.set_header(Constant.METRIC, best_metric)
+        aggr_result.set_header(Constant.CLIENT, best_client)
 
         return aggr_result
 
@@ -287,12 +287,17 @@ class SwarmClientController(ClientSideController):
             aggr_thread.start()
             self.log_info(fl_ctx, "started aggregator thread")
         elif event_type == AppEventType.GLOBAL_BEST_MODEL_AVAILABLE:
+            client = fl_ctx.get_prop(Constant.CLIENT)
+            if client and client != self.me:
+                # this global best model is from other client
+                return
+
             self.best_metric = fl_ctx.get_prop(AppConstants.VALIDATION_RESULT)
             self.best_result = fl_ctx.get_prop(AppConstants.GLOBAL_MODEL)
             self.log_info(fl_ctx, f"got GLOBAL_BEST_MODEL_AVAILABLE: best metric={self.best_metric}")
             current_round = fl_ctx.get_prop(AppConstants.CURRENT_ROUND)
             self.best_round = current_round
-            self.update_status(status=StatusReport(last_round=current_round), timestamp=time.time())
+            self.update_status(last_round=current_round, action="better_aggregation")
 
     def start_workflow(self, shareable: Shareable, fl_ctx: FLContext, abort_signal: Signal) -> Shareable:
         clients = self.get_config_prop(Constant.CLIENTS)
@@ -351,67 +356,41 @@ class SwarmClientController(ClientSideController):
             aggr_result = gatherer.aggregate()
         except:
             self.log_error(fl_ctx, f"exception in aggregation: {secure_format_traceback()}")
-            self.set_error(ReturnCode.EXECUTION_EXCEPTION)
+            self.update_status(action="aggregate", error=ReturnCode.EXECUTION_EXCEPTION)
             return
 
         global_weights = self.shareable_generator.shareable_to_learnable(aggr_result, fl_ctx)
-        self.last_result = global_weights
-        self.last_round = gatherer.for_round
-        fl_ctx.set_prop(AppConstants.GLOBAL_MODEL, global_weights, private=True, sticky=True)
+        self.record_last_result(fl_ctx, gatherer.for_round, global_weights)
 
         # are we done with training?
-        now = time.time()
         num_rounds_done = gatherer.for_round - self.get_config_prop(Constant.START_ROUND, 0) + 1
         if num_rounds_done >= self.get_config_prop(AppConstants.NUM_ROUNDS):
             self.log_info(fl_ctx, f"Swarm Learning Done: number of rounds completed {num_rounds_done}")
 
             # determine the best global result
-            all_done = self._share_final_result(aggr_result, fl_ctx)
-            self.update_status(
-                status=StatusReport(
-                    last_round=gatherer.for_round,
-                    timestamp=gatherer.start_time,
-                    action="share_final_result",
-                    all_done=all_done,
-                ),
-                timestamp=now,
-            )
+            self._distribute_final_results(aggr_result, fl_ctx)
             return
 
         # continue next round
         next_round_data = self.shareable_generator.learnable_to_shareable(global_weights, fl_ctx)
         assert isinstance(next_round_data, Shareable)
 
-        best_round = aggr_result.get_header(Constant.BEST_ROUND)
-        best_metric = aggr_result.get_header(Constant.BEST_METRIC)
-        best_client = aggr_result.get_header(Constant.BEST_CLIENT)
+        best_round = aggr_result.get_header(Constant.ROUND)
+        best_metric = aggr_result.get_header(Constant.METRIC)
+        best_client = aggr_result.get_header(Constant.CLIENT)
 
         if best_client:
-            next_round_data.set_header(Constant.BEST_ROUND, best_round)
-            next_round_data.set_header(Constant.BEST_CLIENT, best_client)
-            next_round_data.set_header(Constant.BEST_METRIC, best_metric)
+            next_round_data.set_header(Constant.ROUND, best_round)
+            next_round_data.set_header(Constant.CLIENT, best_client)
+            next_round_data.set_header(Constant.METRIC, best_metric)
 
         self._scatter(next_round_data, gatherer.for_round + 1, gatherer.fl_ctx)
 
-    def _share_final_result(self, aggr_result: Shareable, fl_ctx: FLContext) -> bool:
-        best_client = aggr_result.get_header(Constant.BEST_CLIENT)
-        best_metric = aggr_result.get_header(Constant.BEST_METRIC)
-        if not best_client:
-            # no best model selection - use my last result
-            self.log_info(fl_ctx, "No global best client - use my last result as final!")
-            self.broadcast_final_result(self.last_result, fl_ctx, best_round=self.last_round)
-            return True
-
-        if best_client == self.me:
-            # my best model
-            self.log_info(fl_ctx, f"I have global best metric {best_metric} - use my best result as final!")
-            self.broadcast_final_result(self.best_result, fl_ctx, self.best_metric, self.best_round)
-            return True
-
+    def _ask_to_share_best_result(self, client: str, metric, fl_ctx: FLContext):
         # other client has best model - ask it to distribute its result
-        self.log_info(fl_ctx, f"client {best_client} has the best metric {best_metric} - ask it to share result")
+        self.log_info(fl_ctx, f"client {client} has the best metric {metric} - ask it to share result")
         resp = self.engine.send_aux_request(
-            targets=[best_client],
+            targets=[client],
             topic=self.topic_for_my_workflow(Constant.TOPIC_SHARE_RESULT),
             request=Shareable(),
             timeout=self.final_result_send_timeout,
@@ -419,22 +398,42 @@ class SwarmClientController(ClientSideController):
         )
 
         assert isinstance(resp, dict)
-        reply = resp.get(best_client)
+        reply = resp.get(client)
         if not reply:
-            self.log_error(fl_ctx, f"failed to ask client {best_client} to share final result")
-            return True
+            self.log_error(fl_ctx, f"failed to ask client {client} to share final result")
+            return
 
         if not isinstance(reply, Shareable):
-            self.log_error(fl_ctx, f"client {best_client} failed to respond to share final result request")
-            return True
+            self.log_error(fl_ctx, f"client {client} failed to respond to share final result request")
+            return
 
         rc = reply.get_return_code()
         if rc != ReturnCode.OK:
-            self.log_error(fl_ctx, f"client {best_client} failed to respond to share final result request: {rc}")
-            return True
+            self.log_error(fl_ctx, f"client {client} failed to respond to share final result request: {rc}")
 
-        self.log_info(fl_ctx, f"asked client {best_client} to share final result")
-        return False
+    def _distribute_final_results(self, aggr_result: Shareable, fl_ctx: FLContext):
+        best_client = aggr_result.get_header(Constant.CLIENT)
+        best_metric = aggr_result.get_header(Constant.METRIC)
+
+        if best_client:
+            if best_client == self.me:
+                # I have the best model
+                self.log_info(fl_ctx, f"I have global best metric {best_metric}")
+                self.broadcast_final_result(
+                    fl_ctx, ResultType.BEST, self.best_result, self.best_metric, self.best_round
+                )
+            else:
+                try:
+                    self._ask_to_share_best_result(best_client, best_metric, fl_ctx)
+                except:
+                    self.log_error(
+                        fl_ctx, f"error asking client {best_client} to share best result {secure_format_traceback()}"
+                    )
+        else:
+            self.log_info(fl_ctx, "No global best result!")
+
+        self.log_info(fl_ctx, "distributing last result")
+        self.broadcast_final_result(fl_ctx, ResultType.LAST, self.last_result, round_num=self.last_round)
 
     def _process_learn_result(self, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
         try:
@@ -462,7 +461,7 @@ class SwarmClientController(ClientSideController):
             if not gatherer:
                 self.log_error(fl_ctx, f"Still no gatherer after {self.learn_task_abort_timeout} seconds")
                 self.log_error(fl_ctx, f"Ignored result from {client_name} for round {current_round} since no gatherer")
-                self.set_error(ReturnCode.EXECUTION_EXCEPTION)
+                self.update_status(action="wait_for_gatherer", error=ReturnCode.EXECUTION_EXCEPTION)
                 return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
             assert isinstance(gatherer, Gatherer)
@@ -473,23 +472,20 @@ class SwarmClientController(ClientSideController):
                     f"but I'm waiting for round {gatherer.for_round}",
                 )
             return gatherer.gather(client_name, request, fl_ctx)
-        except Exception as ex:
-            self.log_exception(fl_ctx, f"exception: {ex}")
-            self.set_error(ReturnCode.EXECUTION_EXCEPTION)
+        except:
+            self.log_exception(fl_ctx, f"exception processing learn result: {secure_format_traceback()}")
+            self.update_status(action="process_learn_result", error=ReturnCode.EXECUTION_EXCEPTION)
             return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
     def do_learn_task(self, name: str, task_data: Shareable, fl_ctx: FLContext, abort_signal: Signal):
         # set status report of starting task
         current_round = task_data.get_header(AppConstants.CURRENT_ROUND)
-        start_time = time.time()
-        self.update_status(
-            StatusReport(last_round=current_round, action="start_learn_task", timestamp=start_time), start_time
-        )
+        self.update_status(last_round=current_round, action="start_learn_task")
 
         aggr = task_data.get_header(Constant.AGGREGATOR)
         if not aggr:
             self.log_error(fl_ctx, f"missing aggregation client for round {current_round}")
-            self.set_error(ReturnCode.EXECUTION_EXCEPTION)
+            self.update_status(action="do_learn_task", error=ReturnCode.EXECUTION_EXCEPTION)
             return
 
         self.log_info(fl_ctx, f"Round {current_round} started.")
@@ -507,7 +503,7 @@ class SwarmClientController(ClientSideController):
                     fl_ctx,
                     f"logic error: got task for round {current_round} while gathering for round {gatherer.for_round}",
                 )
-                self.set_error(ReturnCode.EXECUTION_EXCEPTION)
+                self.update_status(action="do_learn_task", error=ReturnCode.EXECUTION_EXCEPTION)
                 return
 
             self.log_info(fl_ctx, f"setting up the gatherer for round {current_round}")
@@ -534,7 +530,7 @@ class SwarmClientController(ClientSideController):
             rc = result.get_return_code(ReturnCode.OK)
             if rc != ReturnCode.OK:
                 self.log_error(fl_ctx, f"learn executor failed: {rc}")
-                self.set_error(rc)
+                self.update_status(action="learner_execution", error=rc)
                 return
 
             # send the result to the aggr
@@ -549,34 +545,26 @@ class SwarmClientController(ClientSideController):
             reply = resp.get(aggr)
             if not reply:
                 self.log_error(fl_ctx, f"failed to receive reply from aggregation client: {aggr}")
-                self.set_error(ReturnCode.EXECUTION_EXCEPTION)
+                self.update_status(action="receive_learn_result_reply", error=ReturnCode.EXECUTION_EXCEPTION)
                 return
 
             if not isinstance(reply, Shareable):
                 self.log_error(
                     fl_ctx, f"bad reply from aggregation client {aggr}: expect Shareable but got {type(reply)}"
                 )
-                self.set_error(ReturnCode.EXECUTION_EXCEPTION)
+                self.update_status(action="receive_learn_result_reply", error=ReturnCode.EXECUTION_EXCEPTION)
                 return
 
             rc = reply.get_return_code(ReturnCode.OK)
             if rc != ReturnCode.OK:
                 self.log_error(fl_ctx, f"bad return code from aggregation client {aggr}: {rc}")
-                self.set_error(ReturnCode.EXECUTION_EXCEPTION)
+                self.update_status(action="receive_learn_result_reply", error=ReturnCode.EXECUTION_EXCEPTION)
                 return
 
             self.log_info(fl_ctx, f"Finished round {current_round}")
 
             # update status
-            end_time = time.time()
-            self.update_status(
-                status=StatusReport(
-                    last_round=current_round,
-                    timestamp=end_time,
-                    action="finished_learn_task",
-                ),
-                timestamp=end_time,
-            )
+            self.update_status(last_round=current_round, action="finished_learn_task")
 
     def _process_share_result(self, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
         peer_ctx = fl_ctx.get_peer_context()
@@ -588,19 +576,8 @@ class SwarmClientController(ClientSideController):
             )
             return make_reply(ReturnCode.BAD_REQUEST_DATA)
 
-        now = time.time()
-        self.update_status(
-            status=StatusReport(timestamp=now, action="start_share_result_request_process", all_done=True),
-            timestamp=now,
+        self.update_status(action="start_share_result_request_process")
+        self.broadcast_final_result(
+            fl_ctx, ResultType.BEST, self.best_result, metric=self.best_metric, round_num=self.best_round
         )
-
-        self.broadcast_final_result(self.best_result, fl_ctx, self.best_metric, self.best_round)
-
-        # tell server that all is done!
-        now = time.time()
-        self.update_status(
-            status=StatusReport(timestamp=now, action="finished_share_result_request_process", all_done=True),
-            timestamp=now,
-        )
-
         return make_reply(ReturnCode.OK)

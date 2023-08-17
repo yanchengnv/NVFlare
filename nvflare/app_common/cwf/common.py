@@ -24,6 +24,7 @@ class Constant:
     ERROR = "cwf.error"
     ORDER = "cwf.order"
     CLIENTS = "cwf.clients"
+    RESULT_CLIENTS = "cwf.result_clients"
     CLIENT_ORDER = "cwf.client_order"
     LAST_ROUND = "cwf.last_round"
     START_ROUND = "cwf.start_round"
@@ -33,18 +34,25 @@ class Constant:
     AGGR_CLIENTS = "cwf.aggr_clients"
     TRAIN_CLIENTS = "cwf.train_clients"
     AGGREGATOR = "cwf.aggr"
-    BEST_METRIC = "cwf.best_metric"
-    BEST_CLIENT = "cwf.best_client"
-    BEST_ROUND = "cwf.best_round"
+    METRIC = "cwf.metric"
+    CLIENT = "cwf.client"
+    ROUND = "cwf.round"
     CONFIG = "cwf.config"
     STATUS_REPORTS = "cwf.status_reports"
-    FINAL_RESULT = "cwf.final_result"
+    RESULT = "cwf.result"
+    RESULT_TYPE = "cwf.result_type"
 
     TOPIC_LEARN = "cwf.learn"
     TOPIC_RESULT = "cwf.result"
     TOPIC_FINAL_RESULT = "cwf.final_result"
     TOPIC_SHARE_RESULT = "cwf.share_result"
     TOPIC_END_WORKFLOW = "cwf.end_wf"
+
+
+class ResultType:
+
+    BEST = "best"
+    LAST = "last"
 
 
 class RROrder:

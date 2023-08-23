@@ -248,7 +248,7 @@ class SwarmClientController(ClientSideController):
         self.is_aggr = False
         self.last_aggr_round_done = -1
 
-    def process_config(self):
+    def process_config(self, fl_ctx: FLContext):
         all_clients = self.get_config_prop(Constant.CLIENTS)
 
         self.trainers = self.get_config_prop(Constant.TRAIN_CLIENTS)
@@ -359,6 +359,8 @@ class SwarmClientController(ClientSideController):
             self.update_status(action="aggregate", error=ReturnCode.EXECUTION_EXCEPTION)
             return
 
+        # aggr_result could be just weight diffs, not full weights!
+        # need to call shareable_to_learnable to get full weights.
         global_weights = self.shareable_generator.shareable_to_learnable(aggr_result, fl_ctx)
         self.record_last_result(fl_ctx, gatherer.for_round, global_weights)
 

@@ -224,7 +224,7 @@ class ClientSideController(Executor):
             self.fire_event(AppEventType.EXECUTOR_FINALIZED, fl_ctx)
             self.workflow_done = True
 
-    def process_config(self):
+    def process_config(self, fl_ctx: FLContext):
         """This is called to allow the subclass to process config props.
 
         Returns: None
@@ -322,7 +322,7 @@ class ClientSideController(Executor):
             self.log_info(fl_ctx, f"got my workflow id {my_wf_id}")
             self.workflow_id = my_wf_id
 
-            self.process_config()
+            self.process_config(fl_ctx)
 
             self.engine.register_aux_message_handler(
                 topic=topic_for_end_workflow(my_wf_id),
@@ -435,7 +435,7 @@ class ClientSideController(Executor):
             if self.learn_task:
                 t = self.learn_task
                 assert isinstance(t, _LearnTask)
-                self.logger.info("Got a Learn task")
+                self.logger.info(f"Got a Learn task {t.task_name}")
                 try:
                     self.do_learn_task(t.task_name, t.task_data, t.fl_ctx, t.abort_signal)
                 except:

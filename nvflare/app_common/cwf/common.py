@@ -20,10 +20,12 @@ class Constant:
 
     TASK_NAME_CONFIGURE = "wf_config"
     TASK_NAME_START = "wf_start"
+    TASK_NAME_EVAL = "wf_eval"
 
     ERROR = "cwf.error"
     ORDER = "cwf.order"
     CLIENTS = "cwf.clients"
+    START_CLIENT = "cwf.start_client"
     RESULT_CLIENTS = "cwf.result_clients"
     CLIENT_ORDER = "cwf.client_order"
     LAST_ROUND = "cwf.last_round"
@@ -41,12 +43,32 @@ class Constant:
     STATUS_REPORTS = "cwf.status_reports"
     RESULT = "cwf.result"
     RESULT_TYPE = "cwf.result_type"
+    EVAL_LOCAL = "cwf.eval_local"
+    EVAL_GLOBAL = "cwf.eval_global"
+    EVALUATORS = "cwf.evaluators"
+    EVALUATEES = "cwf.evaluatees"
+    MODEL_OWNER = "cwf.model_owner"
+    MODEL_NAME = "cwf.model_name"
+    MODEL_TYPE = "cwf.model_type"
+    GLOBAL_NAMES = "cwf.global_names"
 
     TOPIC_LEARN = "cwf.learn"
     TOPIC_RESULT = "cwf.result"
     TOPIC_FINAL_RESULT = "cwf.final_result"
     TOPIC_SHARE_RESULT = "cwf.share_result"
     TOPIC_END_WORKFLOW = "cwf.end_wf"
+    TOPIC_EVAL = "cwf.eval"
+    TOPIC_GET_MODEL = "cwf.get_model"
+
+    RC_NO_GLOBAL_MODELS = "cwf.no_global_models"
+    RC_NO_LOCAL_MODEL = "cwf.no_local_model"
+    RC_UNABLE_TO_EVAL = "cwf.unable_to_eval"
+
+
+class ModelType:
+
+    LOCAL = "local"
+    GLOBAL = "global"
 
 
 class ResultType:

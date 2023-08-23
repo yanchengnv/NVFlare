@@ -38,6 +38,7 @@ class NPTrainer(Executor):
         sleep_time=0,
         train_task_name=AppConstants.TASK_TRAIN,
         submit_model_task_name=AppConstants.TASK_SUBMIT_MODEL,
+        validate_model_task_name=AppConstants.TASK_VALIDATION,
         model_name="best_numpy.npy",
         model_dir="model",
     ):
@@ -55,6 +56,7 @@ class NPTrainer(Executor):
         self._sleep_time = sleep_time
         self._train_task_name = train_task_name
         self._submit_model_task_name = submit_model_task_name
+        self._validate_model_task_name = validate_model_task_name
 
     def handle_event(self, event_type: str, fl_ctx: FLContext):
         # if event_type == EventType.START_RUN:
@@ -188,12 +190,22 @@ class NPTrainer(Executor):
                 return self._train(shareable=shareable, fl_ctx=fl_ctx, abort_signal=abort_signal)
             elif task_name == self._submit_model_task_name:
                 return self._submit_model(fl_ctx=fl_ctx, abort_signal=abort_signal)
+            elif task_name == self._validate_model_task_name:
+                return self._validate_model(shareable, fl_ctx, abort_signal)
             else:
                 # If unknown task name, set RC accordingly.
                 return make_reply(ReturnCode.TASK_UNKNOWN)
         except Exception as e:
             self.log_exception(fl_ctx, f"Exception in NPTrainer execute: {secure_format_exception(e)}.")
             return make_reply(ReturnCode.EXECUTION_EXCEPTION)
+
+    def _validate_model(self, shareable: Shareable, fl_ctx: FLContext, abort_signal: Signal) -> Shareable:
+        dxo = from_shareable(shareable)
+        self.log_info(fl_ctx, f"Validating model {dxo}")
+        fake_metric = random.uniform(0.1, 1.0)
+        val_results = {"val_accuracy": fake_metric}
+        metric_dxo = DXO(data_kind=DataKind.METRICS, data=val_results)
+        return metric_dxo.to_shareable()
 
     def _load_local_model(self, fl_ctx: FLContext):
         engine = fl_ctx.get_engine()

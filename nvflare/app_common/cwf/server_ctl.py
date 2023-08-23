@@ -23,6 +23,7 @@ from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
 from nvflare.app_common.app_constant import AppConstants
 from nvflare.app_common.cwf.common import Constant, StatusReport, status_report_from_dict, topic_for_end_workflow
+from nvflare.security.logging import secure_format_traceback
 
 
 class ClientStatus:
@@ -137,6 +138,9 @@ class ServerSideController(Controller):
     def prepare_config(self) -> dict:
         return {}
 
+    def sub_flow(self, abort_signal: Signal, fl_ctx: FLContext):
+        pass
+
     def control_flow(self, abort_signal: Signal, fl_ctx: FLContext):
         # wait for every client to become ready
         self.log_info(fl_ctx, f"Waiting for clients to be ready: {self.participating_clients}")
@@ -146,6 +150,7 @@ class ServerSideController(Controller):
 
         learn_config = {
             Constant.CLIENTS: self.participating_clients,
+            Constant.START_CLIENT: self.starting_client,
             Constant.RESULT_CLIENTS: self.result_clients,
             AppConstants.NUM_ROUNDS: self.num_rounds,
             Constant.START_ROUND: self.start_round,
@@ -217,6 +222,9 @@ class ServerSideController(Controller):
 
         self.log_info(fl_ctx, f"started CW on client {self.starting_client}")
 
+        # a subclass could provide additional control flow
+        self.sub_flow(abort_signal, fl_ctx)
+
         self.log_info(fl_ctx, "Waiting for clients to finish ...")
         while not abort_signal.triggered and not self.asked_to_stop:
             time.sleep(self.job_status_check_interval)
@@ -277,6 +285,9 @@ class ServerSideController(Controller):
             error = result.get(Constant.ERROR, "?")
             self.log_error(fl_ctx, f"client {client_task.client.name} failed to configure: {rc}: {error}")
 
+    def client_started(self, client_task: ClientTask, fl_ctx: FLContext):
+        return True
+
     def _process_start_reply(self, client_task: ClientTask, fl_ctx: FLContext):
         result = client_task.result
         client_name = client_task.client.name
@@ -284,12 +295,28 @@ class ServerSideController(Controller):
         rc = result.get_return_code()
         if rc == ReturnCode.OK:
             self.log_info(fl_ctx, f"workflow started by client {client_name}")
+
+            try:
+                ok = self.client_started(client_task, fl_ctx)
+                if not ok:
+                    return
+            except:
+                self.log_info(fl_ctx, f"exception in client_started: {secure_format_traceback()}")
+                return
+
             self.cw_started = True
         else:
             error = result.get(Constant.ERROR, "?")
             self.log_error(fl_ctx, f"client {client_task.client.name} couldn't start workflow: {rc}: {error}")
 
+    def is_sub_flow_done(self, fl_ctx: FLContext) -> bool:
+        return False
+
     def _check_job_status(self, fl_ctx: FLContext):
+        # see whether the server side thinks it's done
+        if self.is_sub_flow_done(fl_ctx):
+            return True
+
         now = time.time()
         overall_last_progress_time = 0.0
         for client_name, cs in self.client_statuses.items():

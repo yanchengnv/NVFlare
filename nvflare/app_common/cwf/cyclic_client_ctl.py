@@ -50,14 +50,24 @@ class CyclicClientController(ClientSideController):
             allow_busy_task=False,
         )
 
+    @staticmethod
+    def _set_task_headers(task_data: Shareable, num_rounds, current_round, client_order):
+        task_data.set_header(AppConstants.NUM_ROUNDS, num_rounds)
+        task_data.set_header(AppConstants.CURRENT_ROUND, current_round)
+        task_data.set_header(Constant.CLIENT_ORDER, client_order)
+
     def start_workflow(self, shareable: Shareable, fl_ctx: FLContext, abort_signal: Signal) -> Shareable:
         clients = self.get_config_prop(Constant.CLIENTS)
         # make sure the starting client is the 1st
         rotate_to_front(self.me, clients)
         rr_order = self.get_config_prop(Constant.ORDER)
-        self.log_info(fl_ctx, f"Starting Round-Robin workflow on clients {clients} with Order {rr_order} ")
-        shareable.set_header(AppConstants.CURRENT_ROUND, self.get_config_prop(Constant.START_ROUND, 0))
-        shareable.set_header(Constant.CLIENT_ORDER, clients)
+        self.log_info(fl_ctx, f"Starting cyclic workflow on clients {clients} with order {rr_order} ")
+        self._set_task_headers(
+            task_data=shareable,
+            num_rounds=self.get_config_prop(AppConstants.NUM_ROUNDS),
+            current_round=self.get_config_prop(Constant.START_ROUND, 0),
+            client_order=clients,
+        )
         self.set_learn_task(task_data=shareable, fl_ctx=fl_ctx)
         return make_reply(ReturnCode.OK)
 
@@ -68,6 +78,14 @@ class CyclicClientController(ClientSideController):
             last_round=current_round,
             action="start_learn_task",
         )
+
+        # need to prepare the GLOBAL_MODEL prop in case the shareable generator needs it
+        # for shareable_to_learnable after training.
+        # Note: the "data" shareable contains full weight before training.
+        # However, the training process may only return weight diffs. To convert to full weights again,
+        # the original weights (GLOBAL_MODEL prop) are needed.
+        global_weights = self.shareable_generator.shareable_to_learnable(data, fl_ctx)
+        fl_ctx.set_prop(AppConstants.GLOBAL_MODEL, global_weights, private=True, sticky=True)
 
         # execute the task
         result = self.execute_train(data, fl_ctx, abort_signal)
@@ -85,10 +103,6 @@ class CyclicClientController(ClientSideController):
         num_rounds = data.get_header(AppConstants.NUM_ROUNDS)
         current_round = data.get_header(AppConstants.CURRENT_ROUND)
         client_order = data.get_header(Constant.CLIENT_ORDER)
-
-        result.set_header(AppConstants.NUM_ROUNDS, num_rounds)
-        result.set_header(AppConstants.CURRENT_ROUND, current_round)
-        result.set_header(Constant.CLIENT_ORDER, client_order)
 
         all_done = False
         assert isinstance(client_order, list)
@@ -113,14 +127,13 @@ class CyclicClientController(ClientSideController):
                         client_order.append(self.me)
                     result.set_header(Constant.CLIENT_ORDER, client_order)
 
-                next_round = current_round + 1
-                result.set_header(AppConstants.CURRENT_ROUND, next_round)
-                self.log_info(fl_ctx, f"Starting new round {next_round} on clients: {client_order}")
+                current_round += 1
+                self.log_info(fl_ctx, f"Starting new round {current_round} on clients: {client_order}")
 
+        last_learnable = self.shareable_generator.shareable_to_learnable(result, fl_ctx)
         if all_done:
-            learnable = self.shareable_generator.shareable_to_learnable(result, fl_ctx)
-            self.record_last_result(fl_ctx, self.last_round, learnable)
-            self.broadcast_final_result(fl_ctx, ResultType.LAST, learnable, round_num=self.last_round)
+            self.record_last_result(fl_ctx, self.last_round, last_learnable)
+            self.broadcast_final_result(fl_ctx, ResultType.LAST, last_learnable, round_num=self.last_round)
             return
 
         # send to next leg
@@ -129,9 +142,11 @@ class CyclicClientController(ClientSideController):
         else:
             next_client = client_order[0]
 
+        next_task_data = self.shareable_generator.learnable_to_shareable(last_learnable, fl_ctx)
+        self._set_task_headers(next_task_data, num_rounds, current_round, client_order)
         sent = self.send_learn_task(
             targets=[next_client],
-            request=result,
+            request=next_task_data,
             fl_ctx=fl_ctx,
         )
         if sent:

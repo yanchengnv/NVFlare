@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import logging
 import threading
 import time
 from collections import deque
@@ -60,7 +60,14 @@ class PipeHandler(object):
 
     """
 
-    def __init__(self, pipe: Pipe, read_interval=0.1, heartbeat_interval=5.0, heartbeat_timeout=30.0):
+    def __init__(
+            self,
+            pipe: Pipe,
+            read_interval=0.1,
+            heartbeat_interval=5.0,
+            heartbeat_timeout=30.0,
+            resend_interval=None,
+    ):
         """
         Constructor of the PipeHandler.
 
@@ -79,10 +86,12 @@ class PipeHandler(object):
         if 0 < heartbeat_timeout <= heartbeat_interval:
             raise ValueError(f"heartbeat_interval {heartbeat_interval} must < heartbeat_timeout {heartbeat_timeout}")
 
+        self.logger = logging.getLogger(self.__class__.__name__)
         self.pipe = pipe
         self.read_interval = read_interval
         self.heartbeat_interval = heartbeat_interval
         self.heartbeat_timeout = heartbeat_timeout
+        self.resend_interval = resend_interval
         self.messages = deque([])
         self.reader = threading.Thread(target=self._read)
         self.reader.daemon = True
@@ -118,10 +127,24 @@ class PipeHandler(object):
         self.cb_kwargs = kwargs
 
     def _send_to_pipe(self, msg: Message, timeout=None):
-        return self.pipe.send(msg, timeout)
+        if not timeout or not self.pipe.can_resend() or not self.resend_interval:
+            return self.pipe.send(msg, timeout)
 
-    def _receive_from_pipe(self):
-        return self.pipe.receive()
+        while not self.asked_to_stop:
+            sent = self.pipe.send(msg, timeout)
+            if sent:
+                return sent
+
+            # wait for resend_interval before resend, but return if asked_to_stop is set during the wait
+            self.logger.debug(f"===== resend after {self.resend_interval} secs")
+            start_wait = time.time()
+            while True:
+                if time.time() - start_wait > self.resend_interval:
+                    break
+                time.sleep(0.1)
+                if self.asked_to_stop:
+                    return False
+        return False
 
     def start(self):
         """Starts the PipeHandler."""
@@ -183,6 +206,7 @@ class PipeHandler(object):
         try:
             self._try_read()
         except Exception as e:
+            self.logger.error(f"read error: {secure_format_exception(e)}")
             self._add_message(self._make_event_message(Topic.PEER_GONE, f"read error: {secure_format_exception(e)}"))
 
     def _try_read(self):
@@ -190,8 +214,9 @@ class PipeHandler(object):
         last_heartbeat_sent_time = 0.0
         while not self.asked_to_stop:
             now = time.time()
-            msg = self._receive_from_pipe()
+            msg = self.pipe.receive()
             if msg:
+                self.logger.debug("got a msg from pipe")
                 last_heartbeat_received_time = now
                 if msg.topic != Topic.HEARTBEAT:
                     self._add_message(msg)
@@ -200,6 +225,7 @@ class PipeHandler(object):
             else:
                 # is peer gone?
                 if self.heartbeat_timeout and now - last_heartbeat_received_time > self.heartbeat_timeout:
+                    self.logger.info(f"===== read timeout after {self.heartbeat_timeout} secs")
                     self._add_message(self._make_event_message(Topic.PEER_GONE, "missing heartbeat"))
                     break
 

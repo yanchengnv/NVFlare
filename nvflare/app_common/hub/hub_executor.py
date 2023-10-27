@@ -65,7 +65,7 @@ class HubExecutor(Executor):
             if not isinstance(pipe, Pipe):
                 raise TypeError(f"pipe must be Pipe type. Got: {type(pipe)}")
             pipe.open(name=job_id)
-            self.pipe_handler = PipeHandler(pipe)
+            self.pipe_handler = PipeHandler(pipe, resend_interval=2.0)
             self.pipe_handler.start()
         elif event_type == EventType.END_RUN:
             # tell T2 system to end run

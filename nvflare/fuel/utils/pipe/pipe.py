@@ -70,6 +70,15 @@ class Pipe(ABC):
             mode (Mode): Mode of the endpoint. A pipe has two endpoints.
                 An endpoint can be either the one that initiates communication or the one listening.
         """
+        if isinstance(mode, str):
+            mode = mode.lower().strip()
+            if mode == "active":
+                mode = Mode.ACTIVE
+            elif mode == "passive":
+                mode = Mode.PASSIVE
+            else:
+                raise ValueError(f"mode must be '{Mode.ACTIVE}' or '{Mode.PASSIVE}' but got {mode}")
+
         if mode != Mode.ACTIVE and mode != Mode.PASSIVE:
             raise ValueError(f"mode must be '{Mode.ACTIVE}' or '{Mode.PASSIVE}' but got {mode}")
         self.mode = mode
@@ -119,6 +128,13 @@ class Pipe(ABC):
         """Close the pipe
 
         Returns: None
+
+        """
+        pass
+
+    @abstractmethod
+    def can_resend(self) -> bool:
+        """Whether the pipe is able to resend a message.
 
         """
         pass

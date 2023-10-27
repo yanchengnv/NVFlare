@@ -266,3 +266,6 @@ class FilePipe(Pipe):
                 shutil.rmtree(pipe_path)
             except Exception:
                 pass
+
+    def can_resend(self) -> bool:
+        return False

@@ -76,7 +76,16 @@ class HubAppDeployer(AppDeployerSpec, FLComponent):
                 None,
             )
 
-        shutil.copyfile(t1_client_app_config_path, workspace.get_client_app_config_file_path(job_id))
+        with open(t1_client_app_config_path) as file:
+            t1_client_app_config_dict = json.load(file)
+            t1_client_app_config_dict["job_id"] = job_id
+
+        t1_client_job_config_path = workspace.get_client_app_config_file_path(job_id)
+
+        with open(t1_client_job_config_path, "w") as f:
+            json.dump(t1_client_app_config_dict, f, indent=4)
+
+        # shutil.copyfile(t1_client_app_config_path, workspace.get_client_app_config_file_path(job_id))
 
         # step 4: modify T2 server's config_fed_server.json to use HubController
         t2_server_app_config_path = workspace.get_server_app_config_file_path(t2_job_id)
@@ -111,6 +120,7 @@ class HubAppDeployer(AppDeployerSpec, FLComponent):
         t2_server_app_config_dict["workflows"] = t2_wf
 
         # recreate T2's server app config file
+        t2_server_app_config_dict["job_id"] = job_id
         with open(t2_server_app_config_path, "w") as f:
             json.dump(t2_server_app_config_dict, f, indent=4)
 

@@ -177,7 +177,7 @@ class _CellInfo:
                 pass
 
 
-class APipe(IPCPipe):
+class APipe(IPCPipe, FLComponent):
     """
     The APipe (Active Pipe) is used on the 3rd-party side
     """
@@ -258,10 +258,27 @@ class APipe(IPCPipe):
         self.secure_mode = secure_mode
         self.workspace_dir = workspace_dir
         self.site_name = site_name
+        self.agent_id = agent_id
         self._initialize()
-        self.ci = self._build_cell(root_url, site_name, agent_id, secure_mode, workspace_dir)
-        self.cell = self.ci.cell
-        self.ci.add_pipe(self)
+        if agent_id:
+            # the hard-coded agent_id
+            self.ci = self._build_cell(root_url, site_name, agent_id, secure_mode, workspace_dir)
+            self.cell = self.ci.cell
+            self.ci.add_pipe(self)
+
+    def handle_event(self, event_type: str, fl_ctx: FLContext):
+        # self.logger.info(f"APipe handling event {event_type}")
+        if event_type == EventType.ABOUT_TO_START_RUN:
+            if not self.site_name:
+                self.site_name = fl_ctx.get_identity_name()
+
+            if not self.agent_id:
+                self.agent_id = fl_ctx.get_job_id()
+                self.logger.info(f"building cell {self.site_name=} {self.agent_id=}")
+                self.ci = self._build_cell(self.root_url, self.site_name, self.agent_id,
+                                           self.secure_mode, self.workspace_dir)
+                self.cell = self.ci.cell
+                self.ci.add_pipe(self)
 
     def open(self, name: str):
         self.ci.start()
@@ -284,6 +301,8 @@ class PPipe(IPCPipe, FLComponent):
             engine = fl_ctx.get_engine()
             self.cell = engine.get_cell()
             self.site_name = fl_ctx.get_identity_name()
+            if not self.agent_id:
+                self.agent_id = fl_ctx.get_job_id()
             self.peer_fqcn = agent_fqcn(self.site_name, self.agent_id)
 
     def open(self, name: str):

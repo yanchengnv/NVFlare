@@ -171,6 +171,8 @@ class ServerRunner(FLComponent):
     def run(self):
         with self.engine.new_context() as fl_ctx:
             self.log_info(fl_ctx, "Server runner starting ...")
+            self.fire_event(EventType.ABOUT_TO_START_RUN, fl_ctx)
+
             self.log_debug(fl_ctx, "firing event EventType.START_RUN")
             fl_ctx.set_prop(ReservedKey.RUN_ABORT_SIGNAL, self.abort_signal, private=True, sticky=True)
             self.fire_event(EventType.START_RUN, fl_ctx)

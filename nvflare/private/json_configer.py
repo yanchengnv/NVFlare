@@ -40,6 +40,7 @@ class JsonConfigurator(JsonObjectProcessor, ComponentBuilder):
         module_names: List[str],
         exclude_libs=True,
         num_passes=1,
+        env_vars=None,
     ):
         """To init the JsonConfigurator.
 
@@ -49,6 +50,7 @@ class JsonConfigurator(JsonObjectProcessor, ComponentBuilder):
             module_names: module names need to be scanned
             exclude_libs: True/False to exclude the libs folder
             num_passes: number of passes to parsing the config
+            env_vars: environment vars
         """
         JsonObjectProcessor.__init__(self)
 
@@ -70,6 +72,7 @@ class JsonConfigurator(JsonObjectProcessor, ComponentBuilder):
 
         self.config_file_names = config_files
         self.num_passes = num_passes
+        self.env_vars = env_vars
         self.module_scanner = ModuleScanner(base_pkgs, module_names, exclude_libs)
         self.config_ctx = None
 
@@ -108,6 +111,10 @@ class JsonConfigurator(JsonObjectProcessor, ComponentBuilder):
         self.config_ctx = config_ctx
 
         all_vars = extract_first_level_primitive(self.config_data)
+
+        if self.env_vars:
+            all_vars.update(self.env_vars)
+
         self.json_scanner.scan(_EnvUpdater(all_vars))
 
         self.start_config(self.config_ctx)

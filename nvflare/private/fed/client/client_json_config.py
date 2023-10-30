@@ -49,6 +49,11 @@ class ClientJsonConfigurator(FedJsonConfigurator):
         base_pkgs = FL_PACKAGES
         module_names = FL_MODULES
 
+        env_vars = {
+            "job_id": args.job_id,
+            "site_name": args.client_name,
+        }
+
         FedJsonConfigurator.__init__(
             self,
             config_file_name=config_file_name,
@@ -56,6 +61,7 @@ class ClientJsonConfigurator(FedJsonConfigurator):
             module_names=module_names,
             exclude_libs=exclude_libs,
             is_server=False,
+            env_vars=env_vars,
         )
 
         if kv_list:

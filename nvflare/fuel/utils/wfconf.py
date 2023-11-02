@@ -42,6 +42,7 @@ class _EnvUpdater(JsonObjectProcessor):
         if element_filter is not None and not callable(element_filter):
             raise ValueError("element_filter must be a callable function but got {}.".format(type(element_filter)))
         self.element_filter = element_filter
+        self.num_updated = 0
 
     def process_element(self, node: Node):
         element = node.element
@@ -58,11 +59,14 @@ class _EnvUpdater(JsonObjectProcessor):
                 parent_element[node.key] = element
 
     def substitute(self, element: str):
+        original_value = element
         a = re.split("{|}", element)
         if len(a) == 3 and a[0] == "" and a[2] == "":
             element = self.vars.get(a[1], None)
         else:
             element = element.format(**self.vars)
+        if element != original_value:
+            self.num_updated += 1
         return element
 
 

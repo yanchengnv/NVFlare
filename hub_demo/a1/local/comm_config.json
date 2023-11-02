@@ -1,0 +1,10 @@
+{
+  "allow_adhoc_conns": true,
+  "adhoc": {
+    "scheme": "tcp",
+    "resources": {
+      "host": "localhost",
+      "secure": false
+    }
+  }
+}

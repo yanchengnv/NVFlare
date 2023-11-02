@@ -1,0 +1,27 @@
+{
+  "format_version": 2,
+  "workflows": [
+    {
+      "id": "controller",
+      "path": "nvflare.app_common.hub.hub_controller.HubController",
+      "args": {
+        "pipe_id": "pipe"
+      }
+    }
+  ],
+  "components": [
+    {
+      "id": "pipe",
+      "path": "nvflare.fuel.utils.pipe.cell_pipe.CellPipe",
+      "args": {
+        "mode": "active",
+        "token": "{JOB_ID}",
+        "root_url": "{T1_ROOT_URL}",
+        "site_name": "site_a",
+        "secure_mode": "{T1_SECURE_TRAIN}",
+        "workspace_dir": "{T1_WORKSPACE}"
+      },
+      "comment": "this is config for T2 server to communicate with T1 client"
+    }
+  ]
+}

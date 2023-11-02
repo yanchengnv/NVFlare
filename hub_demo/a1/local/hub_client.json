@@ -1,0 +1,31 @@
+{
+  "format_version": 2,
+  "executors": [
+    {
+      "tasks": [
+        "*"
+      ],
+      "executor": {
+        "id": "executor",
+        "path": "nvflare.app_common.hub.hub_executor.HubExecutor",
+        "args": {
+          "pipe_id": "pipe"
+        }
+      }
+    }
+  ],
+  "components": [
+    {
+      "id": "pipe",
+      "path": "nvflare.fuel.utils.pipe.cell_pipe.CellPipe",
+      "args": {
+        "mode": "passive",
+        "token": "{JOB_ID}",
+        "site_name": "site_a",
+        "root_url": "{ROOT_URL}",
+        "secure_mode": "{SECURE_TRAIN}",
+        "workspace_dir": "{WORKSPACE}"
+      }
+    }
+  ]
+}

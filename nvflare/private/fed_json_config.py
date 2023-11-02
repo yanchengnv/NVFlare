@@ -35,13 +35,13 @@ class FilterChain(object):
 
 class FedJsonConfigurator(JsonConfigurator):
     def __init__(
-            self,
-            config_file_name: str,
-            base_pkgs: [str],
-            module_names: [str],
-            exclude_libs=True,
-            is_server=True,
-            env_vars=None,
+        self,
+        config_file_name: str,
+        base_pkgs: [str],
+        module_names: [str],
+        exclude_libs=True,
+        is_server=True,
+        env_vars=None,
     ):
         """To init the FedJsonConfigurator.
 

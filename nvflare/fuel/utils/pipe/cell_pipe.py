@@ -17,7 +17,6 @@ import queue
 import threading
 from typing import Union
 
-from nvflare.app_common.decomposers import common_decomposers
 from nvflare.fuel.f3.cellnet.cell import Cell
 from nvflare.fuel.f3.cellnet.cell import Message as CellMessage
 from nvflare.fuel.f3.cellnet.defs import MessageHeaderKey, ReturnCode
@@ -26,6 +25,7 @@ from nvflare.fuel.f3.cellnet.utils import make_reply
 from nvflare.fuel.f3.drivers.driver_params import DriverParams
 from nvflare.fuel.utils.config_service import search_file
 from nvflare.fuel.utils.constants import Mode
+from nvflare.fuel.utils.validation_utils import check_object_type, check_str
 
 from .pipe import Message, Pipe
 
@@ -37,25 +37,23 @@ _HEADER_MSG_ID = _PREFIX + "msg_id"
 _HEADER_REQ_ID = _PREFIX + "req_id"
 
 
-def cell_fqcn(mode, site_name, pipe_id):
-    return f"{site_name}--{pipe_id}_{mode}"
+def _cell_fqcn(mode, site_name, token):
+    # The FQCN of the cell must be unique in the whole cellnet.
+    # We use the combination of mode, site_name, and token to derive the value of FQCN
+    # Since the token is usually used across all sites, the "site_name" differentiate cell on one site from another.
+    # The two peer pipes on the same site share the same site_name and token, but are differentiated by their modes.
+    return f"{site_name}_{token}_{mode}"
 
 
-def to_cell_message(msg: Message) -> CellMessage:
-    headers = {
-        _HEADER_MSG_TYPE: msg.msg_type,
-        _HEADER_MSG_ID: msg.msg_id
-    }
+def _to_cell_message(msg: Message) -> CellMessage:
+    headers = {_HEADER_MSG_TYPE: msg.msg_type, _HEADER_MSG_ID: msg.msg_id}
     if msg.req_id:
         headers[_HEADER_REQ_ID] = msg.req_id
 
-    return CellMessage(
-        headers=headers,
-        payload=msg.data
-    )
+    return CellMessage(headers=headers, payload=msg.data)
 
 
-def from_cell_message(cm: CellMessage) -> Message:
+def _from_cell_message(cm: CellMessage) -> Message:
     return Message(
         msg_id=cm.get_header(_HEADER_MSG_ID),
         msg_type=cm.get_header(_HEADER_MSG_TYPE),
@@ -66,6 +64,10 @@ def from_cell_message(cm: CellMessage) -> Message:
 
 
 class _CellInfo:
+
+    """
+    A cell could be used by multiple pipes (e.g. one pipe for task interaction, another for metrics logging).
+    """
 
     def __init__(self, cell, net_agent):
         self.cell = cell
@@ -90,8 +92,8 @@ class _CellInfo:
                 self.pipes.remove(p)
                 if len(self.pipes) == 0:
                     # all pipes are closed - close cell and agent
-                    self.cell.stop()
                     self.net_agent.close()
+                    self.cell.stop()
             except:
                 pass
 
@@ -99,27 +101,19 @@ class _CellInfo:
 class CellPipe(Pipe):
 
     _lock = threading.Lock()
-    _cells_info = {}  # root_url => {} of cell_name => _CellInfo
-    _initialized = False
+    _cells_info = {}  # (root_url, site_name, token) => _CellInfo
 
     @classmethod
-    def _initialize(cls):
-        with cls._lock:
-            if not cls._initialized:
-                cls._initialized = True
-                common_decomposers.register()
-
-    @classmethod
-    def _build_cell(cls, mode, root_url, site_name, pipe_id, secure_mode, workspace_dir):
+    def _build_cell(cls, mode, root_url, site_name, token, secure_mode, workspace_dir, logger):
         """Build a cell if necessary.
-        The combination of (root_url, site_name, pipe_id) uniquely determine one cell.
+        The combination of (root_url, site_name, token) uniquely determine one cell.
         There can be multiple pipes on the same cell.
 
         Args:
             root_url:
             mode:
             site_name:
-            pipe_id:
+            token:
             secure_mode:
             workspace_dir:
 
@@ -127,7 +121,7 @@ class CellPipe(Pipe):
 
         """
         with cls._lock:
-            cell_key = f"{root_url}.{site_name}.{pipe_id}"
+            cell_key = f"{root_url}.{site_name}.{token}"
             ci = cls._cells_info.get(cell_key)
             if not ci:
                 credentials = {}
@@ -141,7 +135,7 @@ class CellPipe(Pipe):
                     }
 
                 cell = Cell(
-                    fqcn=cell_fqcn(mode, site_name, pipe_id),
+                    fqcn=_cell_fqcn(mode, site_name, token),
                     root_url=root_url,
                     secure=secure_mode,
                     credentials=credentials,
@@ -153,59 +147,68 @@ class CellPipe(Pipe):
             return ci
 
     def __init__(
-            self,
-            mode: Mode,
-            site_name: str,
-            pipe_id: str,
-            root_url: str = "",
-            secure_mode=True,
-            workspace_dir: str = "",
+        self,
+        mode: Mode,
+        site_name: str,
+        token: str,
+        root_url: str = "",
+        secure_mode=True,
+        workspace_dir: str = "",
     ):
         """The constructor of the CellPipe.
 
         Args:
             mode: passive or active mode
             site_name: name of the FLARE site
-            pipe_id: unique id of the pipe.
+            token: unique id to guarantee the uniqueness of cell FQCN.
             root_url: the root url of the cellnet that the pipe's cell will join
             secure_mode: whether connection to the root is secure (TLS)
             workspace_dir: the directory that contains startup kit for joining the cellnet
         """
         super().__init__(mode)
-        self._initialize()
         self.logger = logging.getLogger(self.__class__.__name__)
+
+        check_str("root_url", root_url)
+        check_object_type("secure_mode", secure_mode, bool)
+        check_str("token", token)
+        check_str("site_name", site_name)
+        check_str("workspace_dir", workspace_dir)
+
         self.root_url = root_url
         self.secure_mode = secure_mode
         self.workspace_dir = workspace_dir
         self.site_name = site_name
-        self.pipe_id = pipe_id
+        self.token = token
 
-        mode = str(mode).strip().lower()
-        self.ci = self._build_cell(mode, root_url, site_name, pipe_id, secure_mode, workspace_dir)
+        mode = f"{mode}".strip().lower()  # convert to lower case string
+        self.ci = self._build_cell(mode, root_url, site_name, token, secure_mode, workspace_dir, self.logger)
         self.cell = self.ci.cell
         self.ci.add_pipe(self)
 
         if mode == "active":
             peer_mode = "passive"
-        else:
+        elif mode == "passive":
             peer_mode = "active"
-        self.peer_fqcn = cell_fqcn(peer_mode, site_name, pipe_id)
+        else:
+            raise ValueError(f"invalid mode {mode} - must be 'active' or 'passive'")
+
+        self.peer_fqcn = _cell_fqcn(peer_mode, site_name, token)
         self.received_msgs = queue.Queue()  # contains Message(s), not CellMessage(s)!
-        self.channel = None
-        self.logger.info(f"My Mode {mode}. Peer Cell {self.peer_fqcn}")
+        self.channel = None  # the cellnet message channel
 
     def set_cell_cb(self, channel_name: str):
-        # This allows multiple channels over the same pipe (e.g. one channel for tasks, another for metrics).
-        self.channel = f"{_PREFIX}__{channel_name}"
+        # This allows multiple pipes over the same cell (e.g. one channel for tasks, another for metrics),
+        # as long as different pipes use different cell message channels
+        self.channel = f"{_PREFIX}{channel_name}"
         self.cell.register_request_cb(channel=self.channel, topic="*", cb=self._receive_message)
-        self.logger.info(f"registered request CB for {self.channel}")
+        self.logger.info(f"registered CellPipe request CB for {self.channel}")
 
     def send(self, msg: Message, timeout=None) -> bool:
         reply = self.cell.send_request(
             channel=self.channel,
             topic=msg.topic,
             target=self.peer_fqcn,
-            request=to_cell_message(msg),
+            request=_to_cell_message(msg),
             timeout=timeout,
         )
         if reply:
@@ -225,7 +228,7 @@ class CellPipe(Pipe):
 
         if self.peer_fqcn != sender:
             raise RuntimeError(f"peer FQCN mismatch: expect {self.peer_fqcn} but got {sender}")
-        msg = from_cell_message(request)
+        msg = _from_cell_message(request)
         self.received_msgs.put_nowait(msg)
         return make_reply(ReturnCode.OK)
 

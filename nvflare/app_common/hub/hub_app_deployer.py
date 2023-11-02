@@ -18,7 +18,7 @@ import shutil
 
 from nvflare.apis.app_deployer_spec import AppDeployerSpec, FLContext
 from nvflare.apis.fl_component import FLComponent
-from nvflare.apis.fl_constant import SystemComponents
+from nvflare.apis.fl_constant import JobConfigStdVarName, SystemComponents
 from nvflare.apis.job_def import JobMetaKey
 from nvflare.apis.job_def_manager_spec import JobDefManagerSpec
 from nvflare.apis.utils.job_utils import load_job_def_bytes
@@ -54,6 +54,13 @@ class HubAppDeployer(AppDeployerSpec, FLComponent):
         Returns: error str if any, meta dict, and job bytes to be submitted to T2 store
 
         """
+        t1_workspace_dir = fl_ctx.get_prop(JobConfigStdVarName.WORKSPACE)
+
+        fed_client = fl_ctx.get_prop(SystemComponents.FED_CLIENT)
+        cell = fed_client.cell
+        t1_root_url = cell.get_root_url_for_child()
+        t1_secure_train = cell.is_secure()
+
         server_app_config_path = workspace.get_server_app_config_file_path(job_id)
         if not os.path.exists(server_app_config_path):
             return f"missing {server_app_config_path}", None, None
@@ -76,16 +83,7 @@ class HubAppDeployer(AppDeployerSpec, FLComponent):
                 None,
             )
 
-        with open(t1_client_app_config_path) as file:
-            t1_client_app_config_dict = json.load(file)
-            t1_client_app_config_dict["job_id"] = job_id
-
-        t1_client_job_config_path = workspace.get_client_app_config_file_path(job_id)
-
-        with open(t1_client_job_config_path, "w") as f:
-            json.dump(t1_client_app_config_dict, f, indent=4)
-
-        # shutil.copyfile(t1_client_app_config_path, workspace.get_client_app_config_file_path(job_id))
+        shutil.copyfile(t1_client_app_config_path, workspace.get_client_app_config_file_path(job_id))
 
         # step 4: modify T2 server's config_fed_server.json to use HubController
         t2_server_app_config_path = workspace.get_server_app_config_file_path(t2_job_id)
@@ -119,8 +117,16 @@ class HubAppDeployer(AppDeployerSpec, FLComponent):
             return f"missing workflows in {t2_server_component_file}", None, None
         t2_server_app_config_dict["workflows"] = t2_wf
 
+        # add T1's env vars to T2 server app config so that they can be used in config definition
+        t2_server_app_config_dict.update(
+            {
+                "T1_WORKSPACE": t1_workspace_dir,
+                "T1_ROOT_URL": t1_root_url,
+                "T1_SECURE_TRAIN": t1_secure_train,
+            }
+        )
+
         # recreate T2's server app config file
-        t2_server_app_config_dict["job_id"] = job_id
         with open(t2_server_app_config_path, "w") as f:
             json.dump(t2_server_app_config_dict, f, indent=4)
 

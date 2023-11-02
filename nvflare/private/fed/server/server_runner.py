@@ -79,6 +79,7 @@ class ServerRunner(FLComponent):
         ReturnCode.RUN_MISMATCH,
         ReturnCode.TASK_UNKNOWN,
         ReturnCode.UNSAFE_JOB,
+        ReturnCode.SERVICE_UNAVAILABLE,
     ]
 
     def __init__(self, config: ServerRunnerConfig, job_id: str, engine: ServerEngineSpec):

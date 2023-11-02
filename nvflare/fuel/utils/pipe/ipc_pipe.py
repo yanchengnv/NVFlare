@@ -45,17 +45,11 @@ def agent_fqcn(site_name, agent_id):
 
 
 def to_cell_message(msg: Message) -> CellMessage:
-    headers = {
-        _HEADER_MSG_TYPE: msg.msg_type,
-        _HEADER_MSG_ID: msg.msg_id
-    }
+    headers = {_HEADER_MSG_TYPE: msg.msg_type, _HEADER_MSG_ID: msg.msg_id}
     if msg.req_id:
         headers[_HEADER_REQ_ID] = msg.req_id
 
-    return CellMessage(
-        headers=headers,
-        payload=msg.data
-    )
+    return CellMessage(headers=headers, payload=msg.data)
 
 
 def from_cell_message(cm: CellMessage) -> Message:
@@ -147,7 +141,6 @@ class IPCPipe(Pipe, ABC):
 
 
 class _CellInfo:
-
     def __init__(self, cell, net_agent):
         self.cell = cell
         self.net_agent = net_agent
@@ -183,7 +176,7 @@ class APipe(IPCPipe, FLComponent):
     """
 
     _lock = threading.Lock()
-    _cells_info = {}   # root_url => {} of cell_name => _CellInfo
+    _cells_info = {}  # root_url => {} of cell_name => _CellInfo
     _initialized = False
 
     @classmethod
@@ -275,8 +268,9 @@ class APipe(IPCPipe, FLComponent):
             if not self.agent_id:
                 self.agent_id = fl_ctx.get_job_id()
                 self.logger.info(f"building cell {self.site_name=} {self.agent_id=}")
-                self.ci = self._build_cell(self.root_url, self.site_name, self.agent_id,
-                                           self.secure_mode, self.workspace_dir)
+                self.ci = self._build_cell(
+                    self.root_url, self.site_name, self.agent_id, self.secure_mode, self.workspace_dir
+                )
                 self.cell = self.ci.cell
                 self.ci.add_pipe(self)
 

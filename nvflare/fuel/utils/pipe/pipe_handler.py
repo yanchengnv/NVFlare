@@ -79,6 +79,9 @@ class PipeHandler(object):
             heartbeat_interval: how often to send a heartbeat to the peer
             heartbeat_timeout: how long to wait for a heartbeat from the peer before treating the peer as gone,
                 0 means DO NOT check for heartbeat.
+            resend_interval: how often to resend a message if failing to send. None means no resend.
+                Note that if the pipe does not support resending, then no resend.
+            max_resends: max number of resends. None means no limit.
         """
         check_positive_number("read_interval", read_interval)
         check_positive_number("heartbeat_interval", heartbeat_interval)
@@ -120,9 +123,9 @@ class PipeHandler(object):
         Do not put heavy processing logic in the status_cb.
 
         Args:
-            cb:
-            *args:
-            **kwargs:
+            cb: the callback func
+            *args: the args to be passed to the cb
+            **kwargs: the kwargs to be passed to the cb
 
         Returns: None
 
@@ -135,19 +138,21 @@ class PipeHandler(object):
     def set_message_cb(self, cb, *args, **kwargs):
         """Set CB for message handling. When a regular message is received, this CB is called.
         If the msg CB is not set, the handler simply adds the received msg to the message queue.
+        If the msg CB is set, the received msg will NOT be added to the message queue.
 
         The CB must conform to this signature:
 
             cb(msg, *args, **kwargs)
 
         where the *args and *kwargs are ones passed to this call.
+
         The CB is called from the thread that reads from the pipe, hence it should be short-lived.
         Do not put heavy processing logic in the CB.
 
         Args:
-            cb:
-            *args:
-            **kwargs:
+            cb: the callback func
+            *args: the args to be passed to the cb
+            **kwargs: the kwargs to be passed to the cb
 
         Returns: None
 
@@ -187,7 +192,9 @@ class PipeHandler(object):
         return False
 
     def start(self):
-        """Starts the PipeHandler."""
+        """Starts the PipeHandler.
+        Note: before calling this method, the pipe managed by this PipeHandler must have been opened.
+        """
         if not self.reader.is_alive():
             self.reader.start()
 

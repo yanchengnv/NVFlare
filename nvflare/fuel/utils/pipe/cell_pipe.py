@@ -104,18 +104,18 @@ class CellPipe(Pipe):
     _cells_info = {}  # (root_url, site_name, token) => _CellInfo
 
     @classmethod
-    def _build_cell(cls, mode, root_url, site_name, token, secure_mode, workspace_dir, logger):
+    def _build_cell(cls, mode, root_url, site_name, token, secure_mode, workspace_dir):
         """Build a cell if necessary.
         The combination of (root_url, site_name, token) uniquely determine one cell.
         There can be multiple pipes on the same cell.
 
         Args:
-            root_url:
-            mode:
-            site_name:
-            token:
-            secure_mode:
-            workspace_dir:
+            root_url: root url of the cell net
+            mode: mode (passive or active) of the pipe
+            site_name: name of the site
+            token: the unique token
+            secure_mode: whether cellnet is in secure mode
+            workspace_dir: workspace that contains startup kit for connecting to server. Needed only if secure_mode
 
         Returns:
 
@@ -163,7 +163,7 @@ class CellPipe(Pipe):
             token: unique id to guarantee the uniqueness of cell FQCN.
             root_url: the root url of the cellnet that the pipe's cell will join
             secure_mode: whether connection to the root is secure (TLS)
-            workspace_dir: the directory that contains startup kit for joining the cellnet
+            workspace_dir: the directory that contains startup for joining the cellnet. Required only in secure_mode
         """
         super().__init__(mode)
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -181,7 +181,7 @@ class CellPipe(Pipe):
         self.token = token
 
         mode = f"{mode}".strip().lower()  # convert to lower case string
-        self.ci = self._build_cell(mode, root_url, site_name, token, secure_mode, workspace_dir, self.logger)
+        self.ci = self._build_cell(mode, root_url, site_name, token, secure_mode, workspace_dir)
         self.cell = self.ci.cell
         self.ci.add_pipe(self)
 

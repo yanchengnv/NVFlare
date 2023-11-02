@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import logging
 import time
 from abc import ABC, abstractmethod
 from typing import Any
@@ -50,6 +49,15 @@ class TaskExchanger(Executor, ABC):
 
         Args:
             pipe_id: component id of pipe
+            read_interval: how often to read from pipe
+            heartbeat_interval: how often to send heartbeat to peer
+            heartbeat_timeout: max amount of time to allow missing heartbeats before treating peer as dead
+            resend_interval: how often to resend a message when failing to send
+            max_resends: max number of resends. None means no limit
+            peer_read_timeout: time to wait for peer to accept sent message
+            task_wait_time: how long to wait for a task to complete. None means waiting forever
+            result_poll_interval: how often to poll task result
+            pipe_channel_name: the channel name for sending task requests
         """
         Executor.__init__(self)
         check_str("pipe_id", pipe_id)
@@ -183,6 +191,10 @@ class TaskExchanger(Executor, ABC):
 
 
 class ShareableTaskExchanger(TaskExchanger):
+    """
+    ShareableTaskExchanger uses Shareable to exchange task data with the peer.
+    """
+
     def __init__(
         self,
         pipe_id: str,
@@ -196,6 +208,21 @@ class ShareableTaskExchanger(TaskExchanger):
         result_poll_interval=0.5,
         pipe_channel_name=PipeChannelName.TASK,
     ):
+        """Constructor of ShareableTaskExchanger
+
+        Args:
+            pipe_id: component id of pipe
+            read_interval: how often to read from pipe
+            heartbeat_interval: how often to send heartbeat to peer
+            heartbeat_timeout: max amount of time to allow missing heartbeats before treating peer as dead
+            resend_interval: how often to resend a message when failing to send
+            max_resends: max number of resends. None means no limit
+            peer_read_timeout: time to wait for peer to accept sent message
+            task_wait_time: how long to wait for a task to complete. None means waiting forever
+            result_poll_interval: how often to poll task result
+            pipe_channel_name: the channel name for sending task requests
+        """
+
         super().__init__(
             pipe_id=pipe_id,
             read_interval=read_interval,
@@ -220,6 +247,10 @@ class ShareableTaskExchanger(TaskExchanger):
 
 
 class DXOTaskExchanger(TaskExchanger):
+    """
+    DXOTaskExchanger uses DXO to exchange task data with the peer.
+    """
+
     def __init__(
         self,
         pipe_id: str,
@@ -233,6 +264,20 @@ class DXOTaskExchanger(TaskExchanger):
         result_poll_interval=0.5,
         pipe_channel_name=PipeChannelName.TASK,
     ):
+        """Constructor of DXOTaskExchanger
+
+        Args:
+            pipe_id: component id of pipe
+            read_interval: how often to read from pipe
+            heartbeat_interval: how often to send heartbeat to peer
+            heartbeat_timeout: max amount of time to allow missing heartbeats before treating peer as dead
+            resend_interval: how often to resend a message when failing to send
+            max_resends: max number of resends. None means no limit
+            peer_read_timeout: time to wait for peer to accept sent message
+            task_wait_time: how long to wait for a task to complete. None means waiting forever
+            result_poll_interval: how often to poll task result
+            pipe_channel_name: the channel name for sending task requests
+        """
         super().__init__(
             pipe_id=pipe_id,
             read_interval=read_interval,

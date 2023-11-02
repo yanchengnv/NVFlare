@@ -56,6 +56,7 @@ class ClientJsonConfigurator(FedJsonConfigurator):
         else:
             self.cmd_vars = {}
 
+        # determine the values of variables that can be used in job config.
         sp_scheme = args.sp_scheme
         sp_target = args.sp_target
         sp_url = f"{sp_scheme}://{sp_target}"

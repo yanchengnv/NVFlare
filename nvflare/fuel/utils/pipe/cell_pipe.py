@@ -195,6 +195,8 @@ class CellPipe(Pipe):
         self.peer_fqcn = _cell_fqcn(peer_mode, site_name, token)
         self.received_msgs = queue.Queue()  # contains Message(s), not CellMessage(s)!
         self.channel = None  # the cellnet message channel
+        self.pipe_lock = threading.Lock()  # used to ensure no msg to be sent after closed
+        self.closed = False
 
     def set_cell_cb(self, channel_name: str):
         # This allows multiple pipes over the same cell (e.g. one channel for tasks, another for metrics),
@@ -204,22 +206,27 @@ class CellPipe(Pipe):
         self.logger.info(f"registered CellPipe request CB for {self.channel}")
 
     def send(self, msg: Message, timeout=None) -> bool:
-        reply = self.cell.send_request(
-            channel=self.channel,
-            topic=msg.topic,
-            target=self.peer_fqcn,
-            request=_to_cell_message(msg),
-            timeout=timeout,
-        )
-        if reply:
-            rc = reply.get_header(MessageHeaderKey.RETURN_CODE)
-            if rc == ReturnCode.OK:
-                return True
+        with self.pipe_lock:
+            if self.closed:
+                raise BrokenPipeError("pipe closed")
+
+            reply = self.cell.send_request(
+                channel=self.channel,
+                topic=msg.topic,
+                target=self.peer_fqcn,
+                request=_to_cell_message(msg),
+                timeout=timeout,
+            )
+            if reply:
+                rc = reply.get_header(MessageHeaderKey.RETURN_CODE)
+                if rc == ReturnCode.OK:
+                    return True
+                else:
+                    self.logger.error(
+                        f"failed to send {msg.topic} to {self.peer_fqcn} in channel {self.channel}: {rc}")
+                    return False
             else:
-                self.logger.error(f"return code from peer {self.peer_fqcn}: {rc}")
                 return False
-        else:
-            return False
 
     def _receive_message(self, request: CellMessage) -> Union[None, CellMessage]:
         sender = request.get_header(MessageHeaderKey.ORIGIN)
@@ -249,8 +256,15 @@ class CellPipe(Pipe):
         return True
 
     def open(self, name: str):
-        self.ci.start()
-        self.set_cell_cb(name)
+        with self.pipe_lock:
+            if self.closed:
+                raise BrokenPipeError("pipe already closed")
+            self.ci.start()
+            self.set_cell_cb(name)
 
     def close(self):
-        self.ci.close_pipe(self)
+        with self.pipe_lock:
+            if self.closed:
+                return
+            self.ci.close_pipe(self)
+            self.closed = True

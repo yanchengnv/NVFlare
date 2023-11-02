@@ -238,13 +238,19 @@ class PipeHandler(object):
         """Notifies the peer that the communication is ended normally."""
         p = self.pipe
         if p:
-            p.send(self._make_event_message(Topic.END, data))
+            try:
+                p.send(self._make_event_message(Topic.END, data))
+            except Exception as ex:
+                self.logger.debug(f"exception notify_end: {secure_format_exception(ex)}")
 
     def notify_abort(self, data):
         """Notifies the peer that the communication is aborted."""
         p = self.pipe
         if p:
-            p.send(self._make_event_message(Topic.ABORT, data))
+            try:
+                p.send(self._make_event_message(Topic.ABORT, data))
+            except Exception as ex:
+                self.logger.debug(f"exception notify_abort: {secure_format_exception(ex)}")
 
     def _add_message(self, msg: Message):
         if msg.topic in [Topic.END, Topic.ABORT, Topic.PEER_GONE]:

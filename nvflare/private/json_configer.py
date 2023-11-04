@@ -117,7 +117,7 @@ class JsonConfigurator(JsonObjectProcessor, ComponentBuilder):
         # part of config. After they are removed from config data, they will not be resolved until they are invoked.
         parameterized_items = []
         for k in self.config_data.keys():
-            if isinstance(k, str) and k.startswith('@'):
+            if isinstance(k, str) and k.startswith("@"):
                 parameterized_items.append(k)
         for k in parameterized_items:
             self.config_data.pop(k)

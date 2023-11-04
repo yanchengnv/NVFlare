@@ -86,10 +86,13 @@ def decode_payload(message: Message, encoding_key=MessageHeaderKey.PAYLOAD_ENCOD
         return
 
     if encoding == Encoding.FOBS:
+        msg_len = len(message.payload)
         message.payload = fobs.loads(message.payload)
     elif encoding == Encoding.NONE:
+        msg_len = 0
         message.payload = None
     else:
         # assume to be bytes
-        pass
+        msg_len = len(message.payload)
     message.remove_header(encoding_key)
+    message.set_header(MessageHeaderKey.PAYLOAD_LEN, msg_len)

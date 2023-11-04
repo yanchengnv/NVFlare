@@ -52,13 +52,6 @@ def extract_first_level_primitive(d):
     return result
 
 
-def extract_first_level_items(d):
-    result = {}
-    for k, v in d.items():
-        result[k] = v
-    return result
-
-
 def augment(to_dict: dict, from_dict: dict, from_override_to=False, append_list="components") -> str:
     """Augments the to_dict with the content from the from_dict.
 

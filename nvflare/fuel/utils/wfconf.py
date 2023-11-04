@@ -46,17 +46,6 @@ class _EnvUpdater(JsonObjectProcessor):
         self.num_updated = 0
 
     def process_element(self, node: Node):
-        # ignore delayed refs
-        cur_node = node
-        while cur_node:
-            if cur_node.level == 1 and cur_node.key.startswith("@"):
-                # this is part of a def that contains local vars
-                # do not resolve refs until the def is invoked later since it may contain local vars.
-                # local vars cannot be evaluated until the def is invoked!
-                return
-            else:
-                cur_node = cur_node.parent
-
         element = node.element
         if isinstance(element, str):
             if self.element_filter is not None and not self.element_filter(element):

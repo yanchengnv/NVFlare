@@ -194,8 +194,7 @@ class Communicator:
         return_code = task.get_header(MessageHeaderKey.RETURN_CODE)
 
         if return_code == ReturnCode.OK:
-            size = len(task.payload)
-            task.payload = task.payload
+            size = task.get_header(MessageHeaderKey.PAYLOAD_LEN, 0)
             task_name = task.payload.get_header(ServerCommandKey.TASK_NAME)
             fl_ctx.set_prop(FLContextKey.SSID, ssid, sticky=False)
             if task_name not in [SpecialTaskName.END_RUN, SpecialTaskName.TRY_AGAIN]:

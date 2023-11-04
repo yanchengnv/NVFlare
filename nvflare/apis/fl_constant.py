@@ -213,6 +213,7 @@ class AdminCommandNames(object):
     AUX_COMMAND = "aux_command"
     SYS_INFO = "sys_info"
     REPORT_RESOURCES = "report_resources"
+    REPORT_ENV = "report_env"
     SHOW_SCOPES = "show_scopes"
     CALL = "call"
     SHELL_PWD = "pwd"

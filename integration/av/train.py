@@ -94,7 +94,7 @@ def train(meta, model, agent: FlareAgent):
 
     # Save local numpy model
     agent.log_metric(DXO(data_kind="metric", data={"loss": random.random(), "round": current_round}))
-    agent.log_metric(DXO(data_kind="metric", data={"accuracy": random.random()}))
+    agent.log_metric(DXO(data_kind="metric", data={"accuracy": random.random(), "round": current_round}))
     print(f"Model after training: {np_data}")
 
     # Prepare a DXO for our updated model. Create shareable and return

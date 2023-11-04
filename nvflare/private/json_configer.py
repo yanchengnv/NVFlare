@@ -21,7 +21,7 @@ from nvflare.fuel.utils.config_factory import ConfigFactory
 from nvflare.fuel.utils.config_service import ConfigService
 from nvflare.fuel.utils.dict_utils import augment, extract_first_level_items
 from nvflare.fuel.utils.json_scanner import JsonObjectProcessor, JsonScanner, Node
-from nvflare.fuel.utils.wfconf import _EnvUpdater
+from nvflare.fuel.utils.wfconf import resolve_var_refs
 from nvflare.security.logging import secure_format_exception
 
 
@@ -115,20 +115,8 @@ class JsonConfigurator(JsonObjectProcessor, ComponentBuilder):
         if self.env_vars:
             all_vars.update(self.env_vars)
 
-        # keep updating until nothing to be updated
-        updater = _EnvUpdater(all_vars)
-        max_rounds = 20
-        num_rounds = 0
-        while True:
-            self.json_scanner.scan(updater)
-            num_rounds += 1
-            if updater.num_updated == 0:
-                break
-            else:
-                if num_rounds > max_rounds:
-                    raise ConfigError(
-                        f"item de-ref exceeds {max_rounds} rounds - cyclic refs in {self.config_file_names}")
-                updater.num_updated = 0
+        # resolve var references
+        resolve_var_refs(self.json_scanner, all_vars)
 
         self.start_config(self.config_ctx)
 

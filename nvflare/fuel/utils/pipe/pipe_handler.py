@@ -163,12 +163,16 @@ class PipeHandler(object):
         self.msg_cb_kwargs = kwargs
 
     def _send_to_pipe(self, msg: Message, timeout=None, abort_signal: Signal = None):
-        if not timeout or not self.pipe.can_resend() or not self.resend_interval:
-            return self.pipe.send(msg, timeout)
+        pipe = self.pipe
+        if not pipe:
+            return False
+
+        if not timeout or not pipe.can_resend() or not self.resend_interval:
+            return pipe.send(msg, timeout)
 
         num_sends = 0
         while not self.asked_to_stop:
-            sent = self.pipe.send(msg, timeout)
+            sent = pipe.send(msg, timeout)
             num_sends += 1
             if sent:
                 return sent

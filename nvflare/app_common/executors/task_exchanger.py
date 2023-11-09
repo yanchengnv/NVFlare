@@ -12,17 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import time
-from abc import ABC, abstractmethod
-from typing import Any
+from abc import ABC
 
-from nvflare.apis.dxo import DXO, MetaKey, from_shareable
 from nvflare.apis.event_type import EventType
 from nvflare.apis.executor import Executor
 from nvflare.apis.fl_constant import FLContextKey
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import ReturnCode, Shareable, make_reply
 from nvflare.apis.signal import Signal
-from nvflare.app_common.abstract.exchange_task import ExchangeTask
 from nvflare.app_common.app_constant import AppConstants
 from nvflare.fuel.utils.constants import PipeChannelName
 from nvflare.fuel.utils.pipe.pipe import Message, Pipe
@@ -114,26 +111,22 @@ class TaskExchanger(Executor, ABC):
         self.logger.info(f"pipe status changed to {msg.topic}")
         self.pipe_handler.stop()
 
-    @abstractmethod
-    def shareable_to_exchange_object(self, task_name, task_id, shareable, fl_ctx: FLContext) -> Any:
-        pass
-
-    @abstractmethod
-    def exchange_object_to_shareable(self, task_name, task_id, data: Any, fl_ctx: FLContext) -> Shareable:
-        pass
-
     def execute(self, task_name: str, shareable: Shareable, fl_ctx: FLContext, abort_signal: Signal) -> Shareable:
-        task_id = shareable.get_header(key=FLContextKey.TASK_ID)
+        """
+        The TaskExchanger always sends the Shareable to the peer, and expects to receive a Shareable object from the
+        peer. The peer can convert the Shareable object to whatever format that is best for its applications (e.g.
+        DXO or FLModel object). Similarly, when submitting result, the peer must convert its result object to a
+        Shareable object before sending it back to the TaskExchanger.
 
-        try:
-            task_obj = self.shareable_to_exchange_object(task_name, task_id, shareable, fl_ctx)
-        except Exception as ex:
-            self.log_error(fl_ctx, f"Failed to convert task to exchange object: {secure_format_exception(ex)}")
-            return make_reply(ReturnCode.EXECUTION_EXCEPTION)
+        This "late-binding" (binding of the Shareable object to an application-friendly object) strategy makes the
+        TaskExchanger generic and can be reused for any applications (e.g. Shareable based, DXO based, or any custom
+        data based).
+        """
+        task_id = shareable.get_header(key=FLContextKey.TASK_ID)
 
         # send to peer
         self.log_debug(fl_ctx, "sending task to peer ...")
-        req = Message.new_request(topic=task_name, data=task_obj, msg_id=task_id)
+        req = Message.new_request(topic=task_name, data=shareable, msg_id=task_id)
         start_time = time.time()
         has_been_read = self.pipe_handler.send_to_peer(req, timeout=self.peer_read_timeout, abort_signal=abort_signal)
         if self.peer_read_timeout and not has_been_read:
@@ -179,7 +172,10 @@ class TaskExchanger(Executor, ABC):
                 self.log_info(fl_ctx, f"got result for request '{task_name}' from peer")
 
                 try:
-                    result = self.exchange_object_to_shareable(task_name, task_id, reply.data, fl_ctx)
+                    result = reply.data
+                    if not isinstance(result, Shareable):
+                        self.log_error(fl_ctx, f"bad task result from peer: expect Shareable but got {type(result)}")
+                        result = make_reply(ReturnCode.EXECUTION_EXCEPTION)
                     current_round = shareable.get_header(AppConstants.CURRENT_ROUND)
                     if current_round:
                         result.set_header(AppConstants.CURRENT_ROUND, current_round)
@@ -188,135 +184,3 @@ class TaskExchanger(Executor, ABC):
                     self.log_error(fl_ctx, f"Failed to convert result: {secure_format_exception(ex)}")
                     return make_reply(ReturnCode.EXECUTION_EXCEPTION)
             time.sleep(self.result_poll_interval)
-
-
-class ShareableTaskExchanger(TaskExchanger):
-    """
-    ShareableTaskExchanger uses Shareable to exchange task data with the peer.
-    """
-
-    def __init__(
-        self,
-        pipe_id: str,
-        read_interval=0.1,
-        heartbeat_interval=5.0,
-        heartbeat_timeout=30.0,
-        resend_interval=2.0,
-        max_resends=None,
-        peer_read_timeout=5.0,
-        task_wait_time=None,
-        result_poll_interval=0.5,
-        pipe_channel_name=PipeChannelName.TASK,
-    ):
-        """Constructor of ShareableTaskExchanger
-
-        Args:
-            pipe_id: component id of pipe
-            read_interval: how often to read from pipe
-            heartbeat_interval: how often to send heartbeat to peer
-            heartbeat_timeout: max amount of time to allow missing heartbeats before treating peer as dead
-            resend_interval: how often to resend a message when failing to send
-            max_resends: max number of resends. None means no limit
-            peer_read_timeout: time to wait for peer to accept sent message
-            task_wait_time: how long to wait for a task to complete. None means waiting forever
-            result_poll_interval: how often to poll task result
-            pipe_channel_name: the channel name for sending task requests
-        """
-
-        super().__init__(
-            pipe_id=pipe_id,
-            read_interval=read_interval,
-            heartbeat_interval=heartbeat_interval,
-            heartbeat_timeout=heartbeat_timeout,
-            resend_interval=resend_interval,
-            max_resends=max_resends,
-            peer_read_timeout=peer_read_timeout,
-            task_wait_time=task_wait_time,
-            result_poll_interval=result_poll_interval,
-            pipe_channel_name=pipe_channel_name,
-        )
-
-    def shareable_to_exchange_object(self, task_name, task_id, shareable, fl_ctx: FLContext) -> Any:
-        return shareable
-
-    def exchange_object_to_shareable(self, task_name, task_id, data: Any, fl_ctx: FLContext) -> Shareable:
-        if not isinstance(data, Shareable):
-            self.log_error(fl_ctx, f"bad task result from peer: expect Shareable but got {type(data)}")
-            return make_reply(ReturnCode.EXECUTION_EXCEPTION)
-        return data
-
-
-class DXOTaskExchanger(TaskExchanger):
-    """
-    DXOTaskExchanger uses DXO to exchange task data with the peer.
-    """
-
-    def __init__(
-        self,
-        pipe_id: str,
-        read_interval=0.1,
-        heartbeat_interval=5.0,
-        heartbeat_timeout=30.0,
-        resend_interval=2.0,
-        max_resends=None,
-        peer_read_timeout=5.0,
-        task_wait_time=None,
-        result_poll_interval=0.5,
-        pipe_channel_name=PipeChannelName.TASK,
-    ):
-        """Constructor of DXOTaskExchanger
-
-        Args:
-            pipe_id: component id of pipe
-            read_interval: how often to read from pipe
-            heartbeat_interval: how often to send heartbeat to peer
-            heartbeat_timeout: max amount of time to allow missing heartbeats before treating peer as dead
-            resend_interval: how often to resend a message when failing to send
-            max_resends: max number of resends. None means no limit
-            peer_read_timeout: time to wait for peer to accept sent message
-            task_wait_time: how long to wait for a task to complete. None means waiting forever
-            result_poll_interval: how often to poll task result
-            pipe_channel_name: the channel name for sending task requests
-        """
-        super().__init__(
-            pipe_id=pipe_id,
-            read_interval=read_interval,
-            heartbeat_interval=heartbeat_interval,
-            heartbeat_timeout=heartbeat_timeout,
-            resend_interval=resend_interval,
-            max_resends=max_resends,
-            peer_read_timeout=peer_read_timeout,
-            task_wait_time=task_wait_time,
-            result_poll_interval=result_poll_interval,
-            pipe_channel_name=pipe_channel_name,
-        )
-
-    def shareable_to_exchange_object(self, task_name, task_id, shareable, fl_ctx: FLContext) -> Any:
-        dxo = from_shareable(shareable)
-        ex_task = ExchangeTask(task_name=task_name, task_id=task_id, data=dxo)
-        current_round = shareable.get_header(AppConstants.CURRENT_ROUND, None)
-        if current_round is not None:
-            dxo.set_meta_prop(MetaKey.CURRENT_ROUND, current_round)
-
-        total_rounds = shareable.get_header(AppConstants.NUM_ROUNDS, None)
-        if total_rounds is not None:
-            dxo.set_meta_prop(MetaKey.TOTAL_ROUNDS, total_rounds)
-        return ex_task
-
-    def exchange_object_to_shareable(self, task_name, task_id, data: Any, fl_ctx: FLContext) -> Shareable:
-        if not isinstance(data, ExchangeTask):
-            self.logger.error(f"bad result data from peer - must be ExchangeTask but got {type(data)}")
-            return make_reply(ReturnCode.EXECUTION_EXCEPTION)
-
-        ex_task = data
-        if ex_task.return_code:
-            rc = ex_task.return_code.lower()
-        else:
-            rc = "ok"
-        if rc != "ok":
-            return make_reply(rc)
-
-        if not isinstance(ex_task.data, DXO):
-            self.logger.error(f"bad result data from peer - task data must be DXO but got {type(ex_task.data)}")
-            return make_reply(ReturnCode.EXECUTION_EXCEPTION)
-        return ex_task.data.to_shareable()

@@ -16,10 +16,10 @@ from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import Shareable
 from nvflare.apis.signal import Signal
 from nvflare.app_common.app_constant import AppConstants
-from nvflare.app_common.executors.task_exchanger import ShareableTaskExchanger
+from nvflare.app_common.executors.task_exchanger import TaskExchanger
 
 
-class HubExecutor(ShareableTaskExchanger):
+class HubExecutor(TaskExchanger):
     """
     This executor is to be used by Tier-1 (T1) clients.
     It exchanges task data/result with the Hub Controller of Tier-2 (T2) Server

@@ -120,17 +120,33 @@ class _EnvUpdater(JsonObjectProcessor):
 
 
 def resolve_var_refs(scanner: JsonScanner, var_values: dict):
+    """Resolve var references in the config contained in the scanner
+
+    Args:
+        scanner: the scanner that contains config data to be resolved
+        var_values: the dict that contains var values.
+
+    Returns: None
+
+    """
     updater = _EnvUpdater(var_values)
     max_rounds = 20
     num_rounds = 0
+
+    # var_values may contain multi-level refs (value contains refs to other vars)
+    # we keep scanning and resolving refs until all refs are resolved, or we reached max number of rounds.
+    # The max rounds could be reached either because there are cyclic refs or the ref level is too deep.
     while True:
         scanner.scan(updater)
         num_rounds += 1
         if updater.num_updated == 0:
+            # nothing was resolved - we have resolved everything.
             break
         else:
+            # prepare for the next round
             if num_rounds > max_rounds:
-                raise ConfigError(f"item de-ref exceeds {max_rounds} rounds - there may be cyclic refs")
+                # cyclic refs or nest level too deep.
+                raise ConfigError(f"item de-ref exceeds {max_rounds} rounds - cyclic refs or ref level too deep")
             updater.num_updated = 0
 
 

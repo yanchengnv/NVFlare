@@ -187,7 +187,7 @@ class PipeHandler(object):
                 return False
 
             # wait for resend_interval before resend, but return if asked_to_stop is set during the wait
-            self.logger.info(f"===== resend after {self.resend_interval} secs")
+            self.logger.info(f"will resend '{msg.topic}' in {self.resend_interval} secs")
             start_wait = time.time()
             while True:
                 if time.time() - start_wait > self.resend_interval:

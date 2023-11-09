@@ -55,7 +55,7 @@ def main():
             break
 
         print(f"got task: {task}")
-        dxo = task.dxo
+        dxo = task.data
         assert isinstance(dxo, DXO)
         rc, meta, result = train(dxo.meta, dxo.data, agent)
         result_dxo = DXO(

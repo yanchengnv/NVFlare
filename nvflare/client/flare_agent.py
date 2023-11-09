@@ -17,20 +17,17 @@ import threading
 import time
 import traceback
 
-from nvflare.apis.dxo import DXO
+from nvflare.apis.dxo import DXO, MetaKey, from_shareable
+from nvflare.apis.fl_constant import FLContextKey
+from nvflare.apis.fl_constant import ReturnCode as RC
+from nvflare.apis.shareable import Shareable
 from nvflare.apis.utils.decomposers import flare_decomposers
-from nvflare.app_common.abstract.exchange_task import ExchangeTask
+from nvflare.app_common.app_constant import AppConstants
 from nvflare.app_common.decomposers import common_decomposers
 from nvflare.fuel.utils.constants import PipeChannelName
 from nvflare.fuel.utils.pipe.cell_pipe import CellPipe
 from nvflare.fuel.utils.pipe.pipe import Message, Mode, Pipe
 from nvflare.fuel.utils.pipe.pipe_handler import PipeHandler
-
-
-class RC:
-    OK = "OK"
-    BAD_TASK_DATA = "BAD_TASK_DATA"
-    EXECUTION_EXCEPTION = "EXECUTION_EXCEPTION"
 
 
 class AgentClosed(Exception):
@@ -42,10 +39,10 @@ class CallStateError(Exception):
 
 
 class Task:
-    def __init__(self, task_name: str, task_id: str, dxo: DXO):
+    def __init__(self, task_name: str, task_id: str, data):
         self.task_name = task_name
         self.task_id = task_id
-        self.dxo = dxo
+        self.data = data
 
     def __str__(self):
         return f"'{self.task_name} {self.task_id}'"
@@ -143,6 +140,32 @@ class FlareAgent:
         self.asked_to_stop = True
         self.pipe_handler.stop()
 
+    def shareable_to_task_data(self, shareable: Shareable):
+        """Convert the Shareable object received from the TaskExchanger to an app-friendly format.
+        Subclass can override this method to convert to its own app-friendly task data.
+        By default, we convert to DXO object.
+
+        Args:
+            shareable: the Shareable object received from the TaskExchanger.
+
+        Returns:
+
+        """
+        try:
+            dxo = from_shareable(shareable)
+
+            # add training-related headers carried in the Shareable header to the DXO meta.
+            total_rounds = shareable.get_header(AppConstants.NUM_ROUNDS)
+            if total_rounds is not None:
+                dxo.set_meta_prop(MetaKey.TOTAL_ROUNDS, total_rounds)
+            current_round = shareable.get_header(AppConstants.CURRENT_ROUND)
+            if current_round is not None:
+                dxo.set_meta_prop(MetaKey.CURRENT_ROUND, current_round)
+            return dxo
+        except Exception as ex:
+            self.logger.error(f"failed to extract DXO from shareable object: {ex}")
+            raise ex
+
     def get_task(self):
         """Get a task from FLARE. This is a blocking call.
 
@@ -167,25 +190,25 @@ class FlareAgent:
 
             req = self.pipe_handler.get_next()
             if req:
-                if not isinstance(req.data, ExchangeTask):
-                    self.logger.error(f"bad task: expect request data to be ExchangeTask but got {type(req.data)}")
+                if not isinstance(req.data, Shareable):
+                    self.logger.error(f"bad task: expect request data to be Shareable but got {type(req.data)}")
                     raise RuntimeError("bad request data")
 
-                ex_task = req.data
-                if not isinstance(ex_task.data, DXO):
-                    self.logger.error(f"bad task: expect task data to be DXO but got {type(ex_task.data)}")
-                    raise RuntimeError("bad task data")
+                shareable = req.data
+                task_data = self.shareable_to_task_data(shareable)
+                task_id = shareable.get_header(FLContextKey.TASK_ID)
+                task_name = shareable.get_header(FLContextKey.TASK_NAME)
 
                 tc = _TaskContext(
-                    task_id=ex_task.task_id,
-                    task_name=ex_task.task_name,
+                    task_id=task_id,
+                    task_name=task_name,
                     msg_id=req.msg_id,
                 )
                 self.current_task = tc
-                return Task(task_name=tc.task_name, task_id=tc.task_id, dxo=ex_task.data)
+                return Task(task_name=tc.task_name, task_id=tc.task_id, data=task_data)
             time.sleep(0.5)
 
-    def submit_result(self, result: DXO, rc=RC.OK) -> bool:
+    def submit_result(self, result, rc=RC.OK) -> bool:
         """Submit the result of the current task.
         This is a blocking call. The agent will try to send the result to flare site until it is successfully sent or
         the task is aborted or the agent is closed.
@@ -201,9 +224,6 @@ class FlareAgent:
         made a single time regardless whether the submission is successful.
 
         """
-        if result and not isinstance(result, DXO):
-            raise TypeError(f"result must be DXO but got {type(result)}")
-
         with self.task_lock:
             current_task = self.current_task
             if not current_task:
@@ -212,8 +232,8 @@ class FlareAgent:
 
         try:
             result = self._do_submit_result(current_task, result, rc)
-        except:
-            self.logger.error(f"exception submitting result to {current_task.sender}")
+        except Exception as ex:
+            self.logger.error(f"exception submitting result to {current_task.sender}: {ex}")
             traceback.print_exc()
             result = False
 
@@ -222,11 +242,32 @@ class FlareAgent:
 
         return result
 
-    def _do_submit_result(self, current_task: _TaskContext, result: DXO, rc):
-        ex_task = ExchangeTask(
-            task_name=current_task.task_name, task_id=current_task.task_id, data=result, return_code=rc
-        )
-        reply = Message.new_reply(topic=current_task.task_name, req_msg_id=current_task.msg_id, data=ex_task)
+    def result_to_shareable(self, result, rc):
+        """Convert the result object to Shareable object before sending back to the TaskExchanger.
+        Subclass can override this method to convert its app-friendly result type to Shareable.
+        By default, we expect the result to be DXO object.
+
+        Args:
+            result: the result object to be converted to Shareable. If None, an empty Shareable object will be
+                created with the rc only.
+            rc: the return code.
+
+        Returns: a Shareable object
+
+        """
+        if result is not None:
+            if not isinstance(result, DXO):
+                self.logger.error(f"expect result to be DXO but got {type(result)}")
+                raise RuntimeError("bad result data")
+            result = result.to_shareable()
+        else:
+            result = Shareable()
+        result.set_return_code(rc)
+        return result
+
+    def _do_submit_result(self, current_task: _TaskContext, result, rc):
+        result = self.result_to_shareable(result, rc)
+        reply = Message.new_reply(topic=current_task.task_name, req_msg_id=current_task.msg_id, data=result)
         return self.pipe_handler.send_to_peer(reply, self.submit_result_timeout)
 
     def log_metric(self, record: DXO):

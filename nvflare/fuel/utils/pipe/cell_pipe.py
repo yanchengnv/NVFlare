@@ -222,7 +222,9 @@ class CellPipe(Pipe):
                 if rc == ReturnCode.OK:
                     return True
                 else:
-                    self.logger.error(f"failed to send {msg.topic} to {self.peer_fqcn} in channel {self.channel}: {rc}")
+                    self.logger.error(
+                        f"failed to send '{msg.topic}' to '{self.peer_fqcn}' in channel '{self.channel}': {rc}"
+                    )
                     return False
             else:
                 return False

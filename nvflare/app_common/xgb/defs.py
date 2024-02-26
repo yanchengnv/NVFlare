@@ -77,6 +77,9 @@ class Constant:
     PARAM_KEY_REDUCE_OP = "xgb.reduce_op"
     PARAM_KEY_ROOT = "xgb.root"
     PARAM_KEY_RCV_BUF = "xgb.rcv_buf"
+    PARAM_KEY_HEADERS = "xgb.headers"
+    PARAM_KEY_REPLY = "xgb.reply"
+    PARAM_KEY_REQUEST = "xgb.request"
 
     RUNNER_CTX_SERVER_ADDR = "server_addr"
     RUNNER_CTX_PORT = "port"
@@ -87,6 +90,16 @@ class Constant:
     RUNNER_CTX_DATA_LOADER = "data_loader"
     RUNNER_CTX_TB_DIR = "tb_dir"
     RUNNER_CTX_MODEL_DIR = "model_dir"
+
+    EVENT_BEFORE_BROADCAST = "xgb.before_broadcast"
+    EVENT_AFTER_BROADCAST = "xgb.after_broadcast"
+    EVENT_BEFORE_ALL_GATHER_V = "xgb.before_all_gather_v"
+    EVENT_AFTER_ALL_GATHER_V = "xgb.after_all_gather_v"
+
+    HEADER_KEY_ENCRYPTED_DATA = "xgb.encrypted_data"
+    HEADER_KEY_ORIGINAL_BUF_SIZE = "xgb.original_buf_size"
+
+    DUMMY_BUFFER_SIZE = 4
 
 
 GRPC_DEFAULT_OPTIONS = [

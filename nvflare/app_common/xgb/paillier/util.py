@@ -30,6 +30,10 @@ def split(d):
     return g, h
 
 
+def generate_keys(key_length=1024):
+    return phe.paillier.generate_paillier_keypair(n_length=key_length)
+
+
 def _encode_encrypted_numbers(numbers):
     result = []
     for x in numbers:

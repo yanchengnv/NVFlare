@@ -337,7 +337,7 @@ class XGBClientAdaptor(XGBAdaptor):
         check_positive_int(Constant.CONF_KEY_NUM_ROUNDS, num_rounds)
         self.num_rounds = num_rounds
 
-    def _send_request(self, op: str, req: Shareable) -> bytes:
+    def _send_request(self, op: str, req: Shareable) -> (bytes, Shareable):
         """Send XGB operation request to the FL server via FLARE message.
 
         Args:
@@ -352,11 +352,11 @@ class XGBClientAdaptor(XGBAdaptor):
             rcv_buf = reply.get(Constant.PARAM_KEY_RCV_BUF)
             if not isinstance(rcv_buf, bytes):
                 raise RuntimeError(f"invalid rcv_buf for {op=}: expect bytes but got {type(rcv_buf)}")
-            return rcv_buf
+            return rcv_buf, reply
         else:
             raise RuntimeError(f"invalid reply for op {op}: expect Shareable but got {type(reply)}")
 
-    def _send_all_gather(self, rank: int, seq: int, send_buf: bytes) -> bytes:
+    def _send_all_gather(self, rank: int, seq: int, send_buf: bytes) -> (bytes, Shareable):
         """This method is called by a concrete client adaptor to send Allgather operation to the server.
 
         Args:
@@ -373,7 +373,7 @@ class XGBClientAdaptor(XGBAdaptor):
         req[Constant.PARAM_KEY_SEND_BUF] = send_buf
         return self._send_request(Constant.OP_ALL_GATHER, req)
 
-    def _send_all_gather_v(self, rank: int, seq: int, send_buf: bytes) -> bytes:
+    def _send_all_gather_v(self, rank: int, seq: int, send_buf: bytes, headers=None) -> (bytes, Shareable):
         """This method is called by a concrete client adaptor to send AllgatherV operation to the server.
 
         Args:
@@ -385,12 +385,15 @@ class XGBClientAdaptor(XGBAdaptor):
 
         """
         req = Shareable()
+        self._add_headers(req, headers)
         req[Constant.PARAM_KEY_RANK] = rank
         req[Constant.PARAM_KEY_SEQ] = seq
         req[Constant.PARAM_KEY_SEND_BUF] = send_buf
         return self._send_request(Constant.OP_ALL_GATHER_V, req)
 
-    def _send_all_reduce(self, rank: int, seq: int, data_type: int, reduce_op: int, send_buf: bytes) -> bytes:
+    def _send_all_reduce(
+        self, rank: int, seq: int, data_type: int, reduce_op: int, send_buf: bytes
+    ) -> (bytes, Shareable):
         """This method is called by a concrete client adaptor to send Allreduce operation to the server.
 
         Args:
@@ -411,7 +414,7 @@ class XGBClientAdaptor(XGBAdaptor):
         req[Constant.PARAM_KEY_SEND_BUF] = send_buf
         return self._send_request(Constant.OP_ALL_REDUCE, req)
 
-    def _send_broadcast(self, rank: int, seq: int, root: int, send_buf: bytes) -> bytes:
+    def _send_broadcast(self, rank: int, seq: int, root: int, send_buf: bytes, headers=None) -> (bytes, Shareable):
         """This method is called by a concrete client adaptor to send Broadcast operation to the server.
 
         Args:
@@ -424,8 +427,17 @@ class XGBClientAdaptor(XGBAdaptor):
 
         """
         req = Shareable()
+        self._add_headers(req, headers)
         req[Constant.PARAM_KEY_RANK] = rank
         req[Constant.PARAM_KEY_SEQ] = seq
         req[Constant.PARAM_KEY_ROOT] = root
         req[Constant.PARAM_KEY_SEND_BUF] = send_buf
         return self._send_request(Constant.OP_BROADCAST, req)
+
+    @staticmethod
+    def _add_headers(req: Shareable, headers: dict):
+        if not headers:
+            return
+
+        for k, v in headers.items():
+            req.set_header(k, v)

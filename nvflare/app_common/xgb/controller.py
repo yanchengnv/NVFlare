@@ -258,8 +258,23 @@ class XGBController(Controller):
         rank = request.get(Constant.PARAM_KEY_RANK)
         seq = request.get(Constant.PARAM_KEY_SEQ)
         send_buf = request.get(Constant.PARAM_KEY_SEND_BUF)
+
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_RANK, value=rank, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_SEQ, value=seq, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_SEND_BUF, value=send_buf, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_REQUEST, value=request, private=True, sticky=False)
+        self.fire_event(Constant.EVENT_BEFORE_ALL_GATHER_V, fl_ctx)
+
+        send_buf = fl_ctx.get_prop(Constant.PARAM_KEY_SEND_BUF)
+
         rcv_buf = self.adaptor.all_gather_v(rank, seq, send_buf, fl_ctx)
         reply = Shareable()
+
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_REPLY, value=reply, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_RCV_BUF, value=rcv_buf, private=True, sticky=False)
+        self.fire_event(Constant.EVENT_AFTER_ALL_GATHER_V, fl_ctx)
+        rcv_buf = fl_ctx.get_prop(Constant.PARAM_KEY_RCV_BUF)
+
         reply[Constant.PARAM_KEY_RCV_BUF] = rcv_buf
         return reply
 
@@ -298,9 +313,23 @@ class XGBController(Controller):
         seq = request.get(Constant.PARAM_KEY_SEQ)
         send_buf = request.get(Constant.PARAM_KEY_SEND_BUF)
         root = request.get(Constant.PARAM_KEY_ROOT)
+
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_RANK, value=rank, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_SEQ, value=seq, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_ROOT, value=root, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_SEND_BUF, value=send_buf, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_REQUEST, value=request, private=True, sticky=False)
+        self.fire_event(Constant.EVENT_BEFORE_BROADCAST, fl_ctx)
+
+        send_buf = fl_ctx.get_prop(Constant.PARAM_KEY_SEND_BUF)
         assert isinstance(self.adaptor, XGBServerAdaptor)
         rcv_buf = self.adaptor.broadcast(rank, seq, root, send_buf, fl_ctx)
         reply = Shareable()
+
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_REPLY, value=reply, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_RCV_BUF, value=rcv_buf, private=True, sticky=False)
+        self.fire_event(Constant.EVENT_AFTER_BROADCAST, fl_ctx)
+        rcv_buf = fl_ctx.get_prop(Constant.PARAM_KEY_RCV_BUF)
         reply[Constant.PARAM_KEY_RCV_BUF] = rcv_buf
         return reply
 

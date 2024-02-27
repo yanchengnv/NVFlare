@@ -374,6 +374,14 @@ class XGBClientAdaptor(XGBAdaptor):
         return self._send_request(Constant.OP_ALL_GATHER, req)
 
     def _send_all_gather_v(self, rank: int, seq: int, send_buf: bytes, headers=None) -> (bytes, Shareable):
+        req = Shareable()
+        self._add_headers(req, headers)
+        req[Constant.PARAM_KEY_RANK] = rank
+        req[Constant.PARAM_KEY_SEQ] = seq
+        req[Constant.PARAM_KEY_SEND_BUF] = send_buf
+        return self._send_request(Constant.OP_ALL_GATHER_V, req)
+
+    def _do_all_gather_v(self, rank: int, seq: int, send_buf: bytes) -> (bytes, Shareable):
         """This method is called by a concrete client adaptor to send AllgatherV operation to the server.
 
         Args:
@@ -384,12 +392,24 @@ class XGBClientAdaptor(XGBAdaptor):
         Returns: operation result
 
         """
-        req = Shareable()
-        self._add_headers(req, headers)
-        req[Constant.PARAM_KEY_RANK] = rank
-        req[Constant.PARAM_KEY_SEQ] = seq
-        req[Constant.PARAM_KEY_SEND_BUF] = send_buf
-        return self._send_request(Constant.OP_ALL_GATHER_V, req)
+        fl_ctx = self.engine.new_context()
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_RANK, value=rank, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_SEQ, value=seq, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_SEND_BUF, value=send_buf, private=True, sticky=False)
+        self.fire_event(Constant.EVENT_BEFORE_ALL_GATHER_V, fl_ctx)
+
+        send_buf = fl_ctx.get_prop(Constant.PARAM_KEY_SEND_BUF)
+        rcv_buf, reply = self._send_all_gather_v(
+            rank=rank,
+            seq=seq,
+            send_buf=send_buf,
+            headers=fl_ctx.get_prop(Constant.PARAM_KEY_HEADERS),
+        )
+
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_RCV_BUF, value=rcv_buf, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_REPLY, value=reply, private=True, sticky=False)
+        self.fire_event(Constant.EVENT_AFTER_ALL_GATHER_V, fl_ctx)
+        return fl_ctx.get_prop(Constant.PARAM_KEY_RCV_BUF)
 
     def _send_all_reduce(
         self, rank: int, seq: int, data_type: int, reduce_op: int, send_buf: bytes
@@ -415,6 +435,15 @@ class XGBClientAdaptor(XGBAdaptor):
         return self._send_request(Constant.OP_ALL_REDUCE, req)
 
     def _send_broadcast(self, rank: int, seq: int, root: int, send_buf: bytes, headers=None) -> (bytes, Shareable):
+        req = Shareable()
+        self._add_headers(req, headers)
+        req[Constant.PARAM_KEY_RANK] = rank
+        req[Constant.PARAM_KEY_SEQ] = seq
+        req[Constant.PARAM_KEY_ROOT] = root
+        req[Constant.PARAM_KEY_SEND_BUF] = send_buf
+        return self._send_request(Constant.OP_BROADCAST, req)
+
+    def _do_broadcast(self, rank: int, seq: int, root: int, send_buf: bytes) -> bytes:
         """This method is called by a concrete client adaptor to send Broadcast operation to the server.
 
         Args:
@@ -426,13 +455,26 @@ class XGBClientAdaptor(XGBAdaptor):
         Returns: operation result
 
         """
-        req = Shareable()
-        self._add_headers(req, headers)
-        req[Constant.PARAM_KEY_RANK] = rank
-        req[Constant.PARAM_KEY_SEQ] = seq
-        req[Constant.PARAM_KEY_ROOT] = root
-        req[Constant.PARAM_KEY_SEND_BUF] = send_buf
-        return self._send_request(Constant.OP_BROADCAST, req)
+        fl_ctx = self.engine.new_context()
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_RANK, value=rank, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_SEQ, value=seq, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_ROOT, value=root, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_SEND_BUF, value=send_buf, private=True, sticky=False)
+        self.fire_event(Constant.EVENT_BEFORE_BROADCAST, fl_ctx)
+
+        send_buf = fl_ctx.get_prop(Constant.PARAM_KEY_SEND_BUF)
+        rcv_buf, reply = self._send_broadcast(
+            rank=rank,
+            seq=seq,
+            root=root,
+            send_buf=send_buf,
+            headers=fl_ctx.get_prop(Constant.PARAM_KEY_HEADERS),
+        )
+
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_RCV_BUF, value=rcv_buf, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_REPLY, value=reply, private=True, sticky=False)
+        self.fire_event(Constant.EVENT_AFTER_BROADCAST, fl_ctx)
+        return fl_ctx.get_prop(Constant.PARAM_KEY_RCV_BUF)
 
     @staticmethod
     def _add_headers(req: Shareable, headers: dict):

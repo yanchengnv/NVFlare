@@ -215,24 +215,11 @@ class GrpcClientAdaptor(XGBClientAdaptor, FederatedServicer):
 
     def AllgatherV(self, request: pb2.AllgatherVRequest, context):
         try:
-            fl_ctx = self.engine.new_context()
-            fl_ctx.set_prop(key=Constant.PARAM_KEY_RANK, value=request.rank, private=True, sticky=False)
-            fl_ctx.set_prop(key=Constant.PARAM_KEY_SEQ, value=request.sequence_number, private=True, sticky=False)
-            fl_ctx.set_prop(key=Constant.PARAM_KEY_SEND_BUF, value=request.send_buffer, private=True, sticky=False)
-            self.fire_event(Constant.EVENT_BEFORE_ALL_GATHER_V, fl_ctx)
-
-            send_buf = fl_ctx.get_prop(Constant.PARAM_KEY_SEND_BUF)
-            rcv_buf, reply = self._send_all_gather_v(
+            rcv_buf = self._do_all_gather_v(
                 rank=request.rank,
                 seq=request.sequence_number,
-                send_buf=send_buf,
-                headers=fl_ctx.get_prop(Constant.PARAM_KEY_HEADERS),
+                send_buf=request.send_buffer,
             )
-
-            fl_ctx.set_prop(key=Constant.PARAM_KEY_RCV_BUF, value=rcv_buf, private=True, sticky=False)
-            fl_ctx.set_prop(key=Constant.PARAM_KEY_REPLY, value=reply, private=True, sticky=False)
-            self.fire_event(Constant.EVENT_AFTER_ALL_GATHER_V, fl_ctx)
-            rcv_buf = fl_ctx.get_prop(Constant.PARAM_KEY_RCV_BUF)
             return pb2.AllgatherVReply(receive_buffer=rcv_buf)
         except Exception as ex:
             self._abort(reason=f"send_all_gather_v exception: {secure_format_exception(ex)}")
@@ -254,26 +241,12 @@ class GrpcClientAdaptor(XGBClientAdaptor, FederatedServicer):
 
     def Broadcast(self, request: pb2.BroadcastRequest, context):
         try:
-            fl_ctx = self.engine.new_context()
-            fl_ctx.set_prop(key=Constant.PARAM_KEY_RANK, value=request.rank, private=True, sticky=False)
-            fl_ctx.set_prop(key=Constant.PARAM_KEY_SEQ, value=request.sequence_number, private=True, sticky=False)
-            fl_ctx.set_prop(key=Constant.PARAM_KEY_ROOT, value=request.root, private=True, sticky=False)
-            fl_ctx.set_prop(key=Constant.PARAM_KEY_SEND_BUF, value=request.send_buffer, private=True, sticky=False)
-            self.fire_event(Constant.EVENT_BEFORE_BROADCAST, fl_ctx)
-
-            send_buf = fl_ctx.get_prop(Constant.PARAM_KEY_SEND_BUF)
-            rcv_buf, reply = self._send_broadcast(
+            rcv_buf = self._do_broadcast(
                 rank=request.rank,
+                send_buf=request.send_buffer,
                 seq=request.sequence_number,
                 root=request.root,
-                send_buf=send_buf,
-                headers=fl_ctx.get_prop(Constant.PARAM_KEY_HEADERS),
             )
-
-            fl_ctx.set_prop(key=Constant.PARAM_KEY_RCV_BUF, value=rcv_buf, private=True, sticky=False)
-            fl_ctx.set_prop(key=Constant.PARAM_KEY_REPLY, value=reply, private=True, sticky=False)
-            self.fire_event(Constant.EVENT_AFTER_BROADCAST, fl_ctx)
-            rcv_buf = fl_ctx.get_prop(Constant.PARAM_KEY_RCV_BUF)
             return pb2.BroadcastReply(receive_buffer=rcv_buf)
         except Exception as ex:
             self._abort(reason=f"send_broadcast exception: {secure_format_exception(ex)}")

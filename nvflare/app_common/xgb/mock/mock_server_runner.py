@@ -18,8 +18,9 @@ from nvflare.app_common.xgb.runners.xgb_runner import XGBRunner
 
 
 class MockServerRunner(XGBRunner):
-    def __init__(self, server_max_workers=10):
+    def __init__(self, server_max_workers=10, aggr_timeout=10.0):
         self.server_max_workers = server_max_workers
+        self.aggr_timeout = aggr_timeout
         self._stopped = False
         self._server = None
 
@@ -31,7 +32,7 @@ class MockServerRunner(XGBRunner):
             addr,
             max_workers=self.server_max_workers,
             grpc_options=None,
-            servicer=AggrServicer(num_clients=world_size),
+            servicer=AggrServicer(num_clients=world_size, aggr_timeout=self.aggr_timeout),
         )
         self._server.start(no_blocking=False)
 

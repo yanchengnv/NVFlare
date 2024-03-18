@@ -69,7 +69,7 @@ class AggrServicer(FederatedServicer):
     def _wait_for_result(self, op, rank, seq, request):
         with self.req_lock:
             if not self.req_waiter:
-                self.logger.info(f"setting new waiter: {seq=} {op=}")
+                self.logger.info(f"setting new waiter for {self.aggr_timeout} secs: {seq=} {op=}")
                 self.req_waiter = ReqWaiter(
                     exp_num_clients=self.num_clients,
                     exp_seq=seq,

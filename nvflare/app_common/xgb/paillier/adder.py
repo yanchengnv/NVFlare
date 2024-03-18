@@ -14,6 +14,8 @@
 
 import concurrent.futures
 
+from nvflare.app_common.xgb.aggr import Aggregator
+
 from .util import encode_encrypted_numbers_to_str
 
 
@@ -57,17 +59,33 @@ class Adder:
 
 def _do_add(item):
     encode_sum, fid, encrypted_numbers, mask, num_bins, gid, sample_id_list = item
-    bins = [0 for _ in range(num_bins)]
+    # bins = [0 for _ in range(num_bins)]
+    aggr = Aggregator()
 
-    if not sample_id_list:
-        # all samples
-        for sample_id in range(len(encrypted_numbers)):
-            bid = mask[sample_id]
-            bins[bid] = encrypted_numbers[sample_id] + bins[bid]
-    else:
-        for sample_id in sample_id_list:
-            bid = mask[sample_id]
-            bins[bid] = encrypted_numbers[sample_id] + bins[bid]
+    bins = aggr.aggregate(
+        gh_values=encrypted_numbers,
+        sample_bin_assignment=mask,
+        num_bins=num_bins,
+        sample_ids=sample_id_list,
+    )
+    #
+    # if not sample_id_list:
+    #     # all samples
+    #     for sample_id in range(len(encrypted_numbers)):
+    #         bid = mask[sample_id]
+    #         if bins[bid] == 0:
+    #             # avoid plain_text + cypher_text, which could be slow!
+    #             bins[bid] = encrypted_numbers[sample_id]
+    #         else:
+    #             bins[bid] += encrypted_numbers[sample_id]
+    # else:
+    #     for sample_id in sample_id_list:
+    #         bid = mask[sample_id]
+    #         if bins[bid] == 0:
+    #             # avoid plain_text + cypher_text, which could be slow!
+    #             bins[bid] = encrypted_numbers[sample_id]
+    #         else:
+    #             bins[bid] += encrypted_numbers[sample_id]
 
     if encode_sum:
         sums = encode_encrypted_numbers_to_str(bins)

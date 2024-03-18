@@ -350,8 +350,6 @@ class XGBClientAdaptor(XGBAdaptor):
         reply = self.sender.send_to_server(op, req, self.abort_signal)
         if isinstance(reply, Shareable):
             rcv_buf = reply.get(Constant.PARAM_KEY_RCV_BUF)
-            if not isinstance(rcv_buf, bytes):
-                raise RuntimeError(f"invalid rcv_buf for {op=}: expect bytes but got {type(rcv_buf)}")
             return rcv_buf, reply
         else:
             raise RuntimeError(f"invalid reply for op {op}: expect Shareable but got {type(reply)}")

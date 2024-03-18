@@ -83,6 +83,7 @@ class GrpcClientAdaptor(XGBClientAdaptor, FederatedServicer):
         self._workspace = fl_ctx.get_prop(FLContextKey.WORKSPACE_OBJECT)
         run_number = fl_ctx.get_prop(FLContextKey.CURRENT_RUN)
         self._run_dir = self._workspace.get_run_dir(run_number)
+        self.engine = engine
 
     def _start_client(self, server_addr: str):
         """Start the XGB client runner in a separate thread or separate process based on config.

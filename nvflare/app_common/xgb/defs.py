@@ -80,6 +80,7 @@ class Constant:
     PARAM_KEY_HEADERS = "xgb.headers"
     PARAM_KEY_REPLY = "xgb.reply"
     PARAM_KEY_REQUEST = "xgb.request"
+    PARAM_KEY_EVENT = "xgb.event"
 
     RUNNER_CTX_SERVER_ADDR = "server_addr"
     RUNNER_CTX_PORT = "port"

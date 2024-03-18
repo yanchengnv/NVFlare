@@ -18,7 +18,9 @@ from nvflare.apis.event_type import EventType
 from nvflare.apis.fl_component import FLComponent
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import Shareable
+from nvflare.app_common.xgb.aggr import Aggregator
 from nvflare.app_common.xgb.defs import Constant
+from nvflare.app_common.xgb.mock.mock_data_converter import MockDataConverter
 from nvflare.app_common.xgb.paillier.adder import Adder
 from nvflare.app_common.xgb.paillier.decrypter import Decrypter
 from nvflare.app_common.xgb.paillier.encryptor import Encryptor
@@ -31,10 +33,11 @@ from nvflare.app_common.xgb.paillier.util import (
     generate_keys,
     split,
 )
-from nvflare.app_common.xgb.sec.data_converter import DataConverter
+from nvflare.app_common.xgb.sec.data_converter import FeatureAggregationResult
+from nvflare.app_common.xgb.sec.sec_handler import SecurityHandler
 
 
-class ClientSecurityHandler(FLComponent):
+class ClientSecurityHandler(SecurityHandler):
     def __init__(self, key_length=1024, num_workers=10):
         FLComponent.__init__(self)
         self.num_workers = num_workers
@@ -44,42 +47,42 @@ class ClientSecurityHandler(FLComponent):
         self.encryptor = None
         self.adder = None
         self.decrypter = None
-        self.data_converter = DataConverter()
+        self.data_converter = MockDataConverter()
         self.encrypted_ghs = None
-        self.clear_ghs = None  # for label client: tuple of (g_list, h_list)
+        self.clear_ghs = None  # for label client: list of tuples (g, h)
         self.original_gh_buffer = None
         self.feature_masks = None
-
-    def _abort(self, error: str, fl_ctx: FLContext):
-        self.log_error(fl_ctx, error)
-        self.system_panic(reason=error, fl_ctx=fl_ctx)
+        self.aggregator = Aggregator()
+        self.aggr_result = None  # for label client: computed aggr result based on clear-text clear_ghs
 
     def _process_before_broadcast(self, fl_ctx: FLContext):
         root = fl_ctx.get_prop(Constant.PARAM_KEY_ROOT)
         rank = fl_ctx.get_prop(Constant.PARAM_KEY_RANK)
+        self.info(fl_ctx, "start")
         if root != rank:
             # I am not the source of the broadcast
+            self.info(fl_ctx, "not root - ignore")
             return
 
         buffer = fl_ctx.get_prop(Constant.PARAM_KEY_SEND_BUF)
-        clear_ghs = self.data_converter.decode_gh_pairs(buffer)
+        clear_ghs = self.data_converter.decode_gh_pairs(buffer, fl_ctx)
         if clear_ghs is None:
             # the buffer does not contain (g, h) pairs
+            self.info(fl_ctx, "no clear gh pairs - ignore")
             return
 
-        self.clear_ghs = clear_ghs
+        self.info(fl_ctx, f"got gh {len(clear_ghs)} pairs; original buf len: {len(buffer)}")
         self.original_gh_buffer = buffer
 
         # encrypt clear-text gh pairs and send to server
-        g_values, h_values = clear_ghs
-        gh_combined = [combine(g_values[i], h_values[i]) for i in range(len(g_values))]
+        self.clear_ghs = [combine(clear_ghs[i][0], clear_ghs[i][1]) for i in range(len(clear_ghs))]
         t = time.time()
-        encrypted_values = self.encryptor.encrypt(gh_combined)
-        print(f"encrypted items: {len(encrypted_values)}, took {time.time() - t} secs")
+        encrypted_values = self.encryptor.encrypt(self.clear_ghs)
+        self.info(fl_ctx, f"encrypted gh pairs: {len(encrypted_values)}, took {time.time() - t} secs")
 
         t = time.time()
         encoded = encode_encrypted_data(self.public_key, encrypted_values)
-        print(f"encoded msg: size={len(encoded)} bytes, time={time.time() - t} secs")
+        self.info(fl_ctx, f"encoded msg: size={len(encoded)}, type={type(encoded)} time={time.time()-t} secs")
 
         # Remember the original buffer size, so we could send a dummy buffer of this size to other clients
         # This is important since all XGB clients already prepared a buffer of this size and expect the data
@@ -89,81 +92,114 @@ class ClientSecurityHandler(FLComponent):
         fl_ctx.set_prop(key=Constant.PARAM_KEY_HEADERS, value=headers, private=True, sticky=False)
 
     def _process_after_broadcast(self, fl_ctx: FLContext):
+        # this is called when the bcst result is received from the server
+        self.info(fl_ctx, "start")
         reply = fl_ctx.get_prop(Constant.PARAM_KEY_REPLY)
         assert isinstance(reply, Shareable)
 
         has_encrypted_data = reply.get_header(Constant.HEADER_KEY_ENCRYPTED_DATA)
         if not has_encrypted_data:
+            self.info(fl_ctx, f"{has_encrypted_data=}")
             return
 
         if self.clear_ghs:
             # this is the root rank
             # TBD: assume MPI requires the original buffer to be sent back to it.
             fl_ctx.set_prop(key=Constant.PARAM_KEY_RCV_BUF, value=self.original_gh_buffer, private=True, sticky=False)
+            self.info(fl_ctx, "has_encrypted_data: label client - send original buffer back to XGB")
             return
 
         # this is a receiving non-label client
         # the rcv_buf contains encrypted gh values
         encoded_gh_str = fl_ctx.get_prop(Constant.PARAM_KEY_RCV_BUF)
+        self.info(fl_ctx, f"{len(encoded_gh_str)=} {type(encoded_gh_str)=}")
         self.public_key, self.encrypted_ghs = decode_encrypted_data(encoded_gh_str)
 
         original_buf_size = reply.get_header(Constant.HEADER_KEY_ORIGINAL_BUF_SIZE)
+        self.info(fl_ctx, f"{original_buf_size=}; encrypted gh pairs: {len(self.encrypted_ghs)}")
 
         # send a dummy buffer of original size to the XGB client since it is expecting data to be this size
         dummy_buf = os.urandom(original_buf_size)
         fl_ctx.set_prop(key=Constant.PARAM_KEY_RCV_BUF, value=dummy_buf, private=True, sticky=False)
 
     def _process_before_all_gather_v(self, fl_ctx: FLContext):
+        rank = fl_ctx.get_prop(Constant.PARAM_KEY_RANK)
+        self.info(fl_ctx, f"start")
         buffer = fl_ctx.get_prop(Constant.PARAM_KEY_SEND_BUF)
-        aggr_ctx = self.data_converter.decode_aggregation_context(buffer)
+        aggr_ctx = self.data_converter.decode_aggregation_context(buffer, fl_ctx)
 
         if not aggr_ctx:
             # this AllGatherV is irrelevant to secure processing
+            self.info(fl_ctx, "no aggr ctx - ignore")
             return
 
         if not self.feature_masks:
             # the feature contexts only need to be set once
-            if not aggr_ctx.features:
-                return self._abort("missing features in aggregation context", fl_ctx)
+            if not aggr_ctx.features and not self.clear_ghs:
+                return self._abort("missing features in aggregation context from non-label client", fl_ctx)
+            m = []
+            if aggr_ctx.features:
+                for f in aggr_ctx.features:
+                    m.append((f.feature_id, f.sample_bin_assignment, f.num_bins))
+            self.feature_masks = m
+            self.info(fl_ctx, f"got feature ctx: {len(m)}")
 
-            # convert to adder-friendly data structure
-            feature_masks = []
-            for f in aggr_ctx.features:
-                feature_masks.append((f.feature_id, f.sample_bins, f.num_bins))
-            self.feature_masks = feature_masks
+        # compute aggregation
+        groups = []
+        if aggr_ctx.sample_groups:
+            for gid, sample_ids in aggr_ctx.sample_groups.items():
+                groups.append((gid, sample_ids))
 
-        rank = fl_ctx.get_prop(Constant.PARAM_KEY_RANK)
         if not self.encrypted_ghs:
             if not self.clear_ghs:
                 # this is non-label client
                 return self._abort(f"no encrypted (g, h) values for aggregation in rank {rank}", fl_ctx)
             else:
                 # label client - send a dummy of 4 bytes
-                # note: we assume that XGB code computes aggr results in clear text
-                # alternatively, we could compute aggr result based on self.clear_ghs here - TBD
+                self.info(fl_ctx, "label client: _do_aggregation in clear text")
+                self._do_aggregation(groups)
+                headers = {Constant.HEADER_KEY_ENCRYPTED_DATA: True, Constant.HEADER_KEY_ORIGINAL_BUF_SIZE: len(buffer)}
+                fl_ctx.set_prop(key=Constant.PARAM_KEY_HEADERS, value=headers, private=True, sticky=False)
                 fl_ctx.set_prop(
                     key=Constant.PARAM_KEY_SEND_BUF,
-                    value=os.urandom(Constant.DUMMY_BUFFER_SIZE),
+                    value=None,
                     private=True,
                     sticky=False,
                 )
             return
 
-        # compute aggregation
-        if aggr_ctx.sample_groups:
-            groups = []
-            for i in range(len(aggr_ctx.sample_groups)):
-                groups.append((i, aggr_ctx.sample_groups[i]))
-        else:
-            groups = None
-
+        self.info(fl_ctx, f"_process_before_all_gather_v: non-label client - do encrypted aggr for grp {groups}")
+        start = time.time()
         aggr_result = self.adder.add(self.encrypted_ghs, self.feature_masks, groups, encode_sum=True)
+        self.info(fl_ctx, f"got aggr result for {len(aggr_result)} features in {time.time()-start} secs")
+        start = time.time()
         encoded_str = encode_feature_aggregations(aggr_result)
+        self.info(fl_ctx, f"encoded aggr result len {len(encoded_str)} in {time.time()-start} secs")
         headers = {Constant.HEADER_KEY_ENCRYPTED_DATA: True, Constant.HEADER_KEY_ORIGINAL_BUF_SIZE: len(buffer)}
         fl_ctx.set_prop(key=Constant.PARAM_KEY_SEND_BUF, value=encoded_str, private=True, sticky=False)
         fl_ctx.set_prop(key=Constant.PARAM_KEY_HEADERS, value=headers, private=True, sticky=False)
 
+    def _do_aggregation(self, groups):
+        # this is only for the label-client to compute aggregation in clear-text!
+        if not self.feature_masks:
+            return
+
+        aggr_result = []  # list of (fid, gid, GH_list)
+        for fm in self.feature_masks:
+            fid, masks, num_bins = fm
+            if not groups:
+                gid = 0
+                GH_list = self.aggregator.aggregate(self.clear_ghs, masks, num_bins, None)
+                aggr_result.append((fid, gid, GH_list))
+            else:
+                for grp in groups:
+                    gid, sample_ids = grp
+                    GH_list = self.aggregator.aggregate(self.clear_ghs, masks, num_bins, sample_ids)
+                    aggr_result.append((fid, gid, GH_list))
+        self.aggr_result = aggr_result
+
     def _decrypt_aggr_result(self, encoded):
+        # decrypt aggr result from a client
         if not isinstance(encoded, str):
             # this is dummy result of the label-client
             return encoded
@@ -176,46 +212,71 @@ class ClientSecurityHandler(FLComponent):
         aggr_result = []
         for i in range(len(decoded_aggrs)):
             fid, gid, _ = decoded_aggrs[i]
-
-            # split GH to (G_list, H_list)
-            G_list = []
-            H_list = []
-            clear_aggr = decrypted_aggrs[i]
-            for j in range(len(clear_aggr)):
-                G, H = split(clear_aggr[j])
-                G_list.append(G)
-                H_list.append(H)
-
-            aggr_result.append((fid, gid, (G_list, H_list)))
-        return self.data_converter.encode_aggregation_result(aggr_result)
+            clear_aggr = decrypted_aggrs[i]  # list of combined clear-text ints
+            aggr_result.append((fid, gid, clear_aggr))
+        return aggr_result
 
     def _process_after_all_gather_v(self, fl_ctx: FLContext):
+        # called after AllGatherV result is received from the server
+        self.info(fl_ctx, "start")
+        rank = fl_ctx.get_prop(Constant.PARAM_KEY_RANK)
         reply = fl_ctx.get_prop(Constant.PARAM_KEY_REPLY)
         assert isinstance(reply, Shareable)
         encrypted_data = reply.get_header(Constant.HEADER_KEY_ENCRYPTED_DATA)
         if not encrypted_data:
+            self.info(fl_ctx, "no encrypted result - ignore")
             return
 
-        rank = fl_ctx.get_prop(Constant.PARAM_KEY_RANK)
         rcv_buf = fl_ctx.get_prop(Constant.PARAM_KEY_RCV_BUF)
 
-        # this rcv_buf is a list of replies from each rank
-        if not isinstance(rcv_buf, list):
-            return self._abort(f"rank {rank}: expect a list of aggr result but got {type(rcv_buf)}", fl_ctx)
+        # this rcv_buf is a list of replies from ALL clients!
+        if not isinstance(rcv_buf, dict):
+            return self._abort(f"rank {rank}: expect a dict of aggr result but got {type(rcv_buf)}", fl_ctx)
         rank_replies = rcv_buf
+        self.info(fl_ctx, f"received rank replies: {len(rank_replies)}")
 
         if not self.clear_ghs:
-            # non-label clients don't care about the results
+            # this is non-label client - don't care about the results
             dummy = os.urandom(Constant.DUMMY_BUFFER_SIZE)
-            for i in range(len(rank_replies)):
-                rank_replies[i] = dummy
-        else:
-            # rank_replies contain encrypted aggr result!
-            for i in range(len(rank_replies)):
-                rank_replies[i] = self._decrypt_aggr_result(rank_replies[i])
+            fl_ctx.set_prop(key=Constant.PARAM_KEY_RCV_BUF, value=dummy, private=True, sticky=False)
+            self.info(fl_ctx, "non-label client: return dummy buffer back to XGB")
+            return
 
-        result = self.data_converter.encode_all_gather_v(rank_replies)
-        fl_ctx.set_prop(key=Constant.PARAM_KEY_SEND_BUF, value=result, private=True, sticky=False)
+        # this is label client: rank_replies contain encrypted aggr result!
+        for r, rr in rank_replies.items():
+            if r != rank:
+                # this is aggr result of a non-label client
+                rank_replies[r] = self._decrypt_aggr_result(rr)
+
+        # add label client's result
+        rank_replies[rank] = self.aggr_result
+
+        combined_result = {}  # gid => dict[fid=>GH_list]
+        for r, rr in rank_replies.items():
+            # rr is a list of tuples: fid, gid, GHList
+            for a in rr:
+                fid, gid, combined_numbers = a
+                GH_list = []
+                for n in combined_numbers:
+                    GH_list.append(split(n))
+                grp_result = combined_result.get(gid)
+                if not grp_result:
+                    grp_result = {}
+                    combined_result[gid] = grp_result
+                grp_result[fid] = FeatureAggregationResult(fid, GH_list)
+                self.info(fl_ctx, f"aggr from rank {r}: {fid=} {gid=} bins={len(GH_list)}")
+
+        final_result = {}
+        for gid, far in combined_result.items():
+            sorted_far = sorted(far.items())
+
+            # r is a tuple of (fid, FeatureAggregationResult)
+            final_result[gid] = [r[1] for r in sorted_far]
+            fid_list = [x.feature_id for x in final_result[gid]]
+            self.info(fl_ctx, f"final aggr: {gid=} features={fid_list}")
+
+        result = self.data_converter.encode_aggregation_result(final_result, fl_ctx)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_RCV_BUF, value=result, private=True, sticky=False)
 
     def handle_event(self, event_type: str, fl_ctx: FLContext):
         if event_type == EventType.START_RUN:
@@ -223,11 +284,5 @@ class ClientSecurityHandler(FLComponent):
             self.encryptor = Encryptor(self.public_key, self.num_workers)
             self.decrypter = Decrypter(self.private_key, self.num_workers)
             self.adder = Adder(self.num_workers)
-        elif event_type == Constant.EVENT_BEFORE_BROADCAST:
-            self._process_before_broadcast(fl_ctx)
-        elif event_type == Constant.EVENT_AFTER_BROADCAST:
-            self._process_after_broadcast(fl_ctx)
-        elif event_type == Constant.EVENT_BEFORE_ALL_GATHER_V:
-            self._process_before_all_gather_v(fl_ctx)
-        elif event_type == Constant.EVENT_AFTER_ALL_GATHER_V:
-            self._process_after_all_gather_v(fl_ctx)
+        else:
+            super().handle_event(event_type, fl_ctx)

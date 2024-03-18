@@ -31,6 +31,7 @@ class MockXGBController(XGBController):
         max_client_op_interval: float = Constant.MAX_CLIENT_OP_INTERVAL,
         progress_timeout: float = Constant.WORKFLOW_PROGRESS_TIMEOUT,
         client_ranks=None,
+        aggr_timeout=10.0,
         int_client_grpc_options=None,
         in_process=True,
     ):
@@ -47,11 +48,12 @@ class MockXGBController(XGBController):
             progress_timeout=progress_timeout,
             client_ranks=client_ranks,
         )
+        self.aggr_timeout = aggr_timeout
         self.int_client_grpc_options = int_client_grpc_options
         self.in_process = in_process
 
     def get_adaptor(self, fl_ctx: FLContext):
-        runner = MockServerRunner()
+        runner = MockServerRunner(aggr_timeout=self.aggr_timeout)
         runner.initialize(fl_ctx)
         adaptor = GrpcServerAdaptor(
             int_client_grpc_options=self.int_client_grpc_options,

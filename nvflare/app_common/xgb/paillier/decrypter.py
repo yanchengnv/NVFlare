@@ -32,7 +32,7 @@ class Decrypter:
         Returns: list of lists of decrypted numbers
 
         """
-        print(f"decrypting {len(encrypted_number_groups)} number groups")
+        # print(f"decrypting {len(encrypted_number_groups)} number groups")
         items = []
 
         for g in encrypted_number_groups:
@@ -51,7 +51,7 @@ class Decrypter:
 
 
 def _do_decrypt(item):
-    t = time.time()
+    # t = time.time()
     private_key, numbers = item
     ev = []
     for v in numbers:
@@ -60,5 +60,5 @@ def _do_decrypt(item):
         else:
             d = private_key.decrypt(v)
         ev.append(d)
-    print(f"decrypted {len(numbers)} numbers in {time.time()-t} secs")
+    # print(f"decrypted {len(numbers)} numbers in {time.time()-t} secs")
     return ev

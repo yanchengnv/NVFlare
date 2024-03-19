@@ -26,7 +26,10 @@ from nvflare.app_common.xgb.sec.data_converter import (
     FeatureContext,
 )
 
-SAMPLE_SIZE = 10000
+SAMPLE_SIZE = 1000
+NUM_FEATURES = 30
+WORLD_SIZE = 3
+RANK_FEATURES = [(0, 10), (10, 20), (20, 30)]
 
 
 def decode_msg(msg: bytes) -> dict:
@@ -48,26 +51,39 @@ class MockDataConverter(DataConverter):
             mask[i] = (i + fid) % num_bins
         return FeatureContext(fid, mask, num_bins)
 
+    def _setup(self):
+        self.features = {}
+        for fid in range(NUM_FEATURES):
+            self.features[fid] = self._gen_feature(256, fid)
+
+        for rank, fid_range in enumerate(RANK_FEATURES):
+            if fid_range is not None:
+                f, t = fid_range
+                self.rank_features[rank] = [self.features[fid] for fid in range(f, t)]
+
     def __init__(self):
         self._features_done = False
         self.gh_pairs = None
 
         # feature_id => feature
-        self.features = {
-            0: self._gen_feature(256, 0),
-            1: self._gen_feature(2, 1),
-            2: self._gen_feature(256, 2),
-            3: self._gen_feature(16, 3),
-            4: self._gen_feature(256, 4),
-            5: self._gen_feature(128, 5),
-        }
-
-        # rank => features
-        self.rank_features = {
-            0: [self.features[0], self.features[2]],
-            1: [self.features[1], self.features[3]],
-            2: [self.features[4], self.features[5]],
-        }
+        self.features = {}
+        self.rank_features = {}
+        self._setup()
+        # self.features = {
+        #     0: self._gen_feature(256, 0),
+        #     1: self._gen_feature(2, 1),
+        #     2: self._gen_feature(256, 2),
+        #     3: self._gen_feature(16, 3),
+        #     4: self._gen_feature(256, 4),
+        #     5: self._gen_feature(128, 5),
+        # }
+        #
+        # # rank => features
+        # self.rank_features = {
+        #     # 0: [self.features[0], self.features[2]],
+        #     1: [self.features[0], self.features[1], self.features[3]],
+        #     2: [self.features[2], self.features[4], self.features[5]],
+        # }
 
         self.groups = {}
 
@@ -116,8 +132,6 @@ class MockDataConverter(DataConverter):
         if not self._features_done:
             self._features_done = True
             features = self.rank_features.get(rank)
-            if not features:
-                raise RuntimeError(f"no features for rank {rank}")
         else:
             self.groups = {1: [1, 3, 4, 101], 4: [2, 7, 9, 23, 50]}
         return AggregationContext(features, self.groups)

@@ -157,7 +157,7 @@ class ClientSecurityHandler(SecurityHandler):
             else:
                 # label client - send a dummy of 4 bytes
                 self.info(fl_ctx, "label client: _do_aggregation in clear text")
-                self._do_aggregation(groups)
+                self._do_aggregation(groups, fl_ctx)
                 headers = {Constant.HEADER_KEY_ENCRYPTED_DATA: True, Constant.HEADER_KEY_ORIGINAL_BUF_SIZE: len(buffer)}
                 fl_ctx.set_prop(key=Constant.PARAM_KEY_HEADERS, value=headers, private=True, sticky=False)
                 fl_ctx.set_prop(
@@ -179,11 +179,12 @@ class ClientSecurityHandler(SecurityHandler):
         fl_ctx.set_prop(key=Constant.PARAM_KEY_SEND_BUF, value=encoded_str, private=True, sticky=False)
         fl_ctx.set_prop(key=Constant.PARAM_KEY_HEADERS, value=headers, private=True, sticky=False)
 
-    def _do_aggregation(self, groups):
+    def _do_aggregation(self, groups, fl_ctx: FLContext):
         # this is only for the label-client to compute aggregation in clear-text!
         if not self.feature_masks:
             return
 
+        t = time.time()
         aggr_result = []  # list of (fid, gid, GH_list)
         for fm in self.feature_masks:
             fid, masks, num_bins = fm
@@ -196,18 +197,24 @@ class ClientSecurityHandler(SecurityHandler):
                     gid, sample_ids = grp
                     GH_list = self.aggregator.aggregate(self.clear_ghs, masks, num_bins, sample_ids)
                     aggr_result.append((fid, gid, GH_list))
+        self.info(fl_ctx, f"aggregated clear-text in {time.time()-t} secs")
         self.aggr_result = aggr_result
 
-    def _decrypt_aggr_result(self, encoded):
+    def _decrypt_aggr_result(self, encoded, fl_ctx: FLContext):
         # decrypt aggr result from a client
         if not isinstance(encoded, str):
             # this is dummy result of the label-client
             return encoded
 
         encoded_str = encoded
+        t = time.time()
         decoded_aggrs = decode_feature_aggregations(self.public_key, encoded_str)
+        self.info(fl_ctx, f"decode_feature_aggregations took {time.time()-t} secs")
+
+        t = time.time()
         aggrs_to_decrypt = [decoded_aggrs[i][2] for i in range(len(decoded_aggrs))]
         decrypted_aggrs = self.decrypter.decrypt(aggrs_to_decrypt)  # this is a list of clear-text GH numbers
+        self.info(fl_ctx, f"decrypted {len(aggrs_to_decrypt)} numbers in {time.time()-t} secs")
 
         aggr_result = []
         for i in range(len(decoded_aggrs)):
@@ -246,7 +253,7 @@ class ClientSecurityHandler(SecurityHandler):
         for r, rr in rank_replies.items():
             if r != rank:
                 # this is aggr result of a non-label client
-                rank_replies[r] = self._decrypt_aggr_result(rr)
+                rank_replies[r] = self._decrypt_aggr_result(rr, fl_ctx)
 
         # add label client's result
         rank_replies[rank] = self.aggr_result
@@ -254,6 +261,10 @@ class ClientSecurityHandler(SecurityHandler):
         combined_result = {}  # gid => dict[fid=>GH_list]
         for r, rr in rank_replies.items():
             # rr is a list of tuples: fid, gid, GHList
+            if not rr:
+                # label client may not have any features.
+                continue
+
             for a in rr:
                 fid, gid, combined_numbers = a
                 GH_list = []

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import multiprocessing
+import sys
 import threading
 
 import nvflare.app_common.xgb.proto.federated_pb2 as pb2
@@ -31,8 +32,9 @@ class _ClientStarter:
 
     """
 
-    def __init__(self, runner):
+    def __init__(self, runner, in_process: bool):
         self.xgb_runner = runner
+        self.in_process = in_process
         self.error = None
         self.started = True
         self.stopped = False
@@ -56,6 +58,9 @@ class _ClientStarter:
             self.started = False
             self.stopped = True
             self.exit_code = Constant.EXIT_CODE_CANT_START
+            if not self.in_process:
+                # this is a separate process
+                sys.exit(self.exit_code)
 
 
 class GrpcClientAdaptor(XGBClientAdaptor, FederatedServicer):
@@ -109,7 +114,7 @@ class GrpcClientAdaptor(XGBClientAdaptor, FederatedServicer):
             Constant.RUNNER_CTX_MODEL_DIR: self._run_dir,
             Constant.RUNNER_CTX_TB_DIR: self._app_dir,
         }
-        starter = _ClientStarter(self.xgb_runner)
+        starter = _ClientStarter(self.xgb_runner, self.in_process)
         if self.in_process:
             self.logger.info("starting XGB client in another thread")
             t = threading.Thread(

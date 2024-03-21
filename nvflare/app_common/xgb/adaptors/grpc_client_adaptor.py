@@ -56,8 +56,8 @@ class _ClientStarter:
             secure_log_traceback()
             self.error = f"Exception happens when running xgb train: {secure_format_exception(e)}"
             self.started = False
-            self.stopped = True
             self.exit_code = Constant.EXIT_CODE_CANT_START
+            self.stopped = True
             if not self.in_process:
                 # this is a separate process
                 sys.exit(self.exit_code)

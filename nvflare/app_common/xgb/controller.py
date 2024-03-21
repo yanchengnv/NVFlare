@@ -220,7 +220,7 @@ class XGBController(Controller):
         if exit_code == 0:
             self.log_info(fl_ctx, f"XGB client is done with exit code {exit_code}")
         elif exit_code == Constant.EXIT_CODE_CANT_START:
-            self.log_error(fl_ctx, f"XGB client failed to start!")
+            self.log_error(fl_ctx, f"XGB client failed to start (exit code {exit_code})")
             self.system_panic("XGB client failed to start", fl_ctx)
         else:
             # Should we stop here?

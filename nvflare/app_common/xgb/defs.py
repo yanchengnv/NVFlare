@@ -69,6 +69,8 @@ class Constant:
     ERR_NO_CLIENT_FOR_RANK = -3
     ERR_TARGET_ERROR = -4
 
+    EXIT_CODE_CANT_START = -101
+
     # XGB operation parameter keys
     PARAM_KEY_RANK = "xgb.rank"
     PARAM_KEY_SEQ = "xgb.seq"

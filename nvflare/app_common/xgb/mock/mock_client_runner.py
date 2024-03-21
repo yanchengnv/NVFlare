@@ -28,6 +28,7 @@ class MockClientRunner(XGBRunner, FLComponent):
         self.asked_to_stop = False
 
     def run(self, ctx: dict):
+        # raise RuntimeError("ABORTED")
         server_addr = ctx.get(Constant.RUNNER_CTX_SERVER_ADDR)
         rank = ctx.get(Constant.RUNNER_CTX_RANK)
         num_rounds = ctx.get(Constant.RUNNER_CTX_NUM_ROUNDS)

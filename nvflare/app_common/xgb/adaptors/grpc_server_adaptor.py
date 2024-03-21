@@ -37,6 +37,7 @@ class GrpcServerAdaptor(XGBServerAdaptor):
         self.internal_xgb_client = None
         self._process = None
         self._server_stopped = False
+        self._exit_code = 0
 
     def _try_start_server(self, addr: str, port: int, world_size: int):
         ctx = {
@@ -46,7 +47,10 @@ class GrpcServerAdaptor(XGBServerAdaptor):
         }
         try:
             self.xgb_runner.run(ctx)
+            self._server_stopped = True
         except Exception as ex:
+            self._server_stopped = True
+            self._exit_code = Constant.EXIT_CODE_CANT_START
             self.logger.error(f"Exception running xgb_runner {ctx=}: {secure_format_exception(ex)}")
             raise ex
 
@@ -76,7 +80,7 @@ class GrpcServerAdaptor(XGBServerAdaptor):
 
     def _is_stopped(self) -> (bool, int):
         if self._server_stopped:
-            return True, 0
+            return True, self._exit_code
 
         if self.in_process:
             if self.xgb_runner:

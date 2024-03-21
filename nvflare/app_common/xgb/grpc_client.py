@@ -54,7 +54,6 @@ class GrpcClient:
 
         self.started = True
 
-        # TBD: need to support secure channel as well
         self.channel = grpc.insecure_channel(self.server_addr, options=self.grpc_options)
         self.stub = FederatedStub(self.channel)
 

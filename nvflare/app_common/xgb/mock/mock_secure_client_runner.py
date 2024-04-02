@@ -18,14 +18,14 @@ import nvflare.app_common.xgb.proto.federated_pb2 as pb2
 from nvflare.apis.fl_component import FLComponent
 from nvflare.app_common.xgb.defs import Constant
 from nvflare.app_common.xgb.grpc_client import GrpcClient
-from nvflare.app_common.xgb.runners.xgb_runner import XGBRunner
+from nvflare.app_common.xgb.runners.xgb_runner import AppRunner
 
 
 def encode_msg(msg: dict):
     return bytes(json.dumps(msg), "utf-8")
 
 
-class MockSecureClientRunner(XGBRunner, FLComponent):
+class MockSecureClientRunner(AppRunner, FLComponent):
     def __init__(self, sample_size=1000):
         FLComponent.__init__(self)
         self.training_stopped = False
@@ -33,6 +33,7 @@ class MockSecureClientRunner(XGBRunner, FLComponent):
         self.sample_size = sample_size
 
     def run(self, ctx: dict):
+        self.logger.info("START TRAINING")
         server_addr = ctx.get(Constant.RUNNER_CTX_SERVER_ADDR)
         rank = ctx.get(Constant.RUNNER_CTX_RANK)
         num_rounds = ctx.get(Constant.RUNNER_CTX_NUM_ROUNDS)
@@ -54,22 +55,24 @@ class MockSecureClientRunner(XGBRunner, FLComponent):
             data = {
                 "op": "none",
             }
-
-            self.logger.info("sending broadcast")
+            msg_data = encode_msg(data)
+            self.logger.info("sending non-GH broadcast")
             start = time.time()
             seq += 1
             result = client.send_broadcast(
                 seq_num=seq,
                 rank=rank,
-                data=encode_msg(data),
+                data=msg_data,
                 root=0,
             )
             total_reqs += 1
             total_time += time.time() - start
             if not isinstance(result, pb2.BroadcastReply):
                 self.logger.error(f"expect reply to be pb2.BroadcastReply but got {type(result)}")
+            elif result.receive_buffer != msg_data:
+                self.logger.error("ERROR: broadcast result does not match request")
             else:
-                self.logger.info("OK: broadcast result received!")
+                self.logger.info("OK: broadcast result matched!")
 
             # gh bcst
             data = {

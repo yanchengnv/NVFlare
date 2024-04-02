@@ -1,4 +1,4 @@
-# Copyright (c) 2023, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,16 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import multiprocessing
-import threading
-
 import nvflare.app_common.xgb.proto.federated_pb2 as pb2
 from nvflare.apis.fl_context import FLContext
-from nvflare.app_common.xgb.adaptors.adaptor import XGBServerAdaptor
+from nvflare.app_common.xgb.adaptors.xgb_adaptor import XGBServerAdaptor
 from nvflare.app_common.xgb.defs import Constant
 from nvflare.app_common.xgb.grpc_client import GrpcClient
 from nvflare.fuel.f3.drivers.net_utils import get_open_tcp_port
-from nvflare.security.logging import secure_format_exception
 
 
 class GrpcServerAdaptor(XGBServerAdaptor):
@@ -30,73 +26,36 @@ class GrpcServerAdaptor(XGBServerAdaptor):
         xgb_server_ready_timeout=Constant.XGB_SERVER_READY_TIMEOUT,
         in_process=True,
     ):
-        XGBServerAdaptor.__init__(self)
+        XGBServerAdaptor.__init__(self, in_process)
         self.int_client_grpc_options = int_client_grpc_options
         self.xgb_server_ready_timeout = xgb_server_ready_timeout
         self.in_process = in_process
         self.internal_xgb_client = None
-        self._process = None
         self._server_stopped = False
         self._exit_code = 0
 
-    def _try_start_server(self, addr: str, port: int, world_size: int):
-        ctx = {
+    def _start_server(self, addr: str, port: int, world_size: int, fl_ctx: FLContext):
+        runner_ctx = {
             Constant.RUNNER_CTX_SERVER_ADDR: addr,
             Constant.RUNNER_CTX_WORLD_SIZE: world_size,
             Constant.RUNNER_CTX_PORT: port,
         }
-        try:
-            self.xgb_runner.run(ctx)
-            self._server_stopped = True
-        except Exception as ex:
-            self._server_stopped = True
-            self._exit_code = Constant.EXIT_CODE_CANT_START
-            self.logger.error(f"Exception running xgb_runner {ctx=}: {secure_format_exception(ex)}")
-            raise ex
 
-    def _start_server(self, addr: str, port: int, world_size: int):
-        if self.in_process:
-            self.logger.info("starting XGB server in another thread")
-            t = threading.Thread(
-                name="xgb_server_thread", target=self._try_start_server, args=(addr, port, world_size), daemon=True
-            )
-            t.start()
-        else:
-            self.logger.info("starting XGB server in another process")
-            self._process = multiprocessing.Process(
-                name="xgb_server_process", target=self._try_start_server, args=(addr, port, world_size), daemon=True
-            )
-            self._process.start()
+        self.start_runner(runner_ctx, fl_ctx)
 
     def _stop_server(self):
         self._server_stopped = True
-        if self.in_process:
-            if self.xgb_runner:
-                self.xgb_runner.stop()
-        else:
-            if self._process:
-                self._process.kill()
-                self._process = None
+        self.stop_runner()
 
     def _is_stopped(self) -> (bool, int):
+        runner_stopped, ec = self.is_runner_stopped()
+        if runner_stopped:
+            return runner_stopped, ec
+
         if self._server_stopped:
             return True, self._exit_code
 
-        if self.in_process:
-            if self.xgb_runner:
-                return self.xgb_runner.is_stopped()
-            else:
-                return True, 0
-        else:
-            if self._process:
-                assert isinstance(self._process, multiprocessing.Process)
-                ec = self._process.exitcode
-                if ec is None:
-                    return False, 0
-                else:
-                    return True, ec
-            else:
-                return True, 0
+        return False, 0
 
     def start(self, fl_ctx: FLContext):
         # we dynamically create server address on localhost
@@ -105,7 +64,7 @@ class GrpcServerAdaptor(XGBServerAdaptor):
             raise RuntimeError("failed to get a port for XGB server")
 
         server_addr = f"127.0.0.1:{port}"
-        self._start_server(server_addr, port, self.world_size)
+        self._start_server(server_addr, port, self.world_size, fl_ctx)
 
         # start XGB client
         self.internal_xgb_client = GrpcClient(server_addr, self.int_client_grpc_options)

@@ -11,56 +11,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import multiprocessing
-import sys
-import threading
-
 import nvflare.app_common.xgb.proto.federated_pb2 as pb2
 from nvflare.apis.fl_constant import FLContextKey
 from nvflare.apis.fl_context import FLContext
-from nvflare.app_common.xgb.adaptors.adaptor import XGBClientAdaptor
+from nvflare.app_common.xgb.adaptors.xgb_adaptor import XGBClientAdaptor
 from nvflare.app_common.xgb.defs import Constant
 from nvflare.app_common.xgb.grpc_server import GrpcServer
 from nvflare.app_common.xgb.proto.federated_pb2_grpc import FederatedServicer
 from nvflare.fuel.f3.drivers.net_utils import get_open_tcp_port
-from nvflare.security.logging import secure_format_exception, secure_log_traceback
-
-
-class _ClientStarter:
-    """This small class is used to start XGB client runner. It is used when running the runner in a thread
-    or in a separate process.
-
-    """
-
-    def __init__(self, runner, in_process: bool):
-        self.xgb_runner = runner
-        self.in_process = in_process
-        self.error = None
-        self.started = True
-        self.stopped = False
-        self.exit_code = 0
-
-    def start(self, ctx: dict):
-        """Start the runner and wait for it to finish.
-
-        Args:
-            ctx:
-
-        Returns:
-
-        """
-        try:
-            self.xgb_runner.run(ctx)
-            self.stopped = True
-        except Exception as e:
-            secure_log_traceback()
-            self.error = f"Exception happens when running xgb train: {secure_format_exception(e)}"
-            self.started = False
-            self.exit_code = Constant.EXIT_CODE_CANT_START
-            self.stopped = True
-            if not self.in_process:
-                # this is a separate process
-                sys.exit(self.exit_code)
+from nvflare.security.logging import secure_format_exception
 
 
 class GrpcClientAdaptor(XGBClientAdaptor, FederatedServicer):
@@ -69,7 +28,7 @@ class GrpcClientAdaptor(XGBClientAdaptor, FederatedServicer):
         int_server_grpc_options=None,
         in_process=True,
     ):
-        XGBClientAdaptor.__init__(self)
+        XGBClientAdaptor.__init__(self, in_process)
         self.int_server_grpc_options = int_server_grpc_options
         self.in_process = in_process
         self.internal_xgb_server = None
@@ -80,8 +39,6 @@ class GrpcClientAdaptor(XGBClientAdaptor, FederatedServicer):
         self._app_dir = None
         self._workspace = None
         self._run_dir = None
-        self._process = None
-        self._starter = None
 
     def initialize(self, fl_ctx: FLContext):
         self._client_name = fl_ctx.get_identity_name()
@@ -93,7 +50,7 @@ class GrpcClientAdaptor(XGBClientAdaptor, FederatedServicer):
         self._run_dir = self._workspace.get_run_dir(run_number)
         self.engine = engine
 
-    def _start_client(self, server_addr: str):
+    def _start_client(self, server_addr: str, fl_ctx: FLContext):
         """Start the XGB client runner in a separate thread or separate process based on config.
         Note that when starting runner in a separate process, we must not call a method defined in this
         class since the self object contains a sender that contains a Core Cell which cannot be sent to
@@ -105,7 +62,7 @@ class GrpcClientAdaptor(XGBClientAdaptor, FederatedServicer):
         Returns: None
 
         """
-        ctx = {
+        runner_ctx = {
             Constant.RUNNER_CTX_WORLD_SIZE: self.world_size,
             Constant.RUNNER_CTX_CLIENT_NAME: self._client_name,
             Constant.RUNNER_CTX_SERVER_ADDR: server_addr,
@@ -114,63 +71,21 @@ class GrpcClientAdaptor(XGBClientAdaptor, FederatedServicer):
             Constant.RUNNER_CTX_MODEL_DIR: self._run_dir,
             Constant.RUNNER_CTX_TB_DIR: self._app_dir,
         }
-        starter = _ClientStarter(self.xgb_runner, self.in_process)
-        if self.in_process:
-            self.logger.info("starting XGB client in another thread")
-            t = threading.Thread(
-                target=starter.start,
-                args=(ctx,),
-                daemon=True,
-                name="xgb_client_thread_runner",
-            )
-            t.start()
-            if not starter.started:
-                self.logger.error(f"cannot start XGB client: {starter.error}")
-                raise RuntimeError(starter.error)
-            self._starter = starter
-        else:
-            # start as a separate local process
-            self.logger.info("starting XGB client in another process")
-            self._process = multiprocessing.Process(
-                target=starter.start,
-                args=(ctx,),
-                daemon=True,
-                name="xgb_client_process_runner",
-            )
-            self._process.start()
+        self.start_runner(runner_ctx, fl_ctx)
 
     def _stop_client(self):
         self._training_stopped = True
-        if self.in_process:
-            if self.xgb_runner:
-                self.xgb_runner.stop()
-        else:
-            if self._process:
-                self._process.kill()
+        self.stop_runner()
 
     def _is_stopped(self) -> (bool, int):
-        if self.in_process:
-            if self._starter:
-                if self._starter.stopped:
-                    return True, self._starter.exit_code
+        runner_stopped, ec = self.is_runner_stopped()
+        if runner_stopped:
+            return runner_stopped, ec
 
-            if self._training_stopped:
-                return True, 0
+        if self._training_stopped:
+            return True, 0
 
-            if self.xgb_runner:
-                return self.xgb_runner.is_stopped()
-            else:
-                return True, 0
-        else:
-            if self._process:
-                assert isinstance(self._process, multiprocessing.Process)
-                ec = self._process.exitcode
-                if ec is None:
-                    return False, 0
-                else:
-                    return True, ec
-            else:
-                return True, 0
+        return False, 0
 
     def start(self, fl_ctx: FLContext):
         if self.rank is None:
@@ -188,7 +103,7 @@ class GrpcClientAdaptor(XGBClientAdaptor, FederatedServicer):
         self.internal_xgb_server = GrpcServer(self.internal_server_addr, 10, self.int_server_grpc_options, self)
         self.internal_xgb_server.start(no_blocking=True)
         self.logger.info(f"Started internal server at {self.internal_server_addr}")
-        self._start_client(self.internal_server_addr)
+        self._start_client(self.internal_server_addr, fl_ctx)
         self.logger.info("Started external XGB Client")
 
     def stop(self, fl_ctx: FLContext):

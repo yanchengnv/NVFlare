@@ -13,11 +13,8 @@
 # limitations under the License.
 
 import json
-import logging
-import logging.config
 import os
 import sys
-from logging.handlers import RotatingFileHandler
 from typing import List
 
 from nvflare.apis.app_validation import AppValidator
@@ -34,6 +31,8 @@ from nvflare.fuel.f3.stats_pool import CsvRecordHandler, StatsPoolManager
 from nvflare.fuel.sec.audit import AuditService
 from nvflare.fuel.sec.authz import AuthorizationService
 from nvflare.fuel.sec.security_content_service import LoadResult, SecurityContentService
+from nvflare.fuel.utils.log_utils import add_log_file_handler
+from nvflare.fuel.utils.log_utils import configure_logging as config_logging
 from nvflare.private.defs import RequestHeader, SSLConstants
 from nvflare.private.event import fire_event
 from nvflare.private.fed.utils.decomposers import private_decomposers
@@ -45,12 +44,7 @@ from .app_authz import AppAuthzService
 
 
 def add_logfile_handler(log_file):
-    root_logger = logging.getLogger()
-    main_handler = root_logger.handlers[0]
-    file_handler = RotatingFileHandler(log_file, maxBytes=20 * 1024 * 1024, backupCount=10)
-    file_handler.setLevel(main_handler.level)
-    file_handler.setFormatter(main_handler.formatter)
-    root_logger.addHandler(file_handler)
+    add_log_file_handler(log_file)
 
 
 def _check_secure_content(site_type: str) -> List[str]:
@@ -176,9 +170,7 @@ def find_char_positions(s, ch):
 
 
 def configure_logging(workspace: Workspace):
-    log_config_file_path = workspace.get_log_config_file_path()
-    assert os.path.isfile(log_config_file_path), f"missing log config file {log_config_file_path}"
-    logging.config.fileConfig(fname=log_config_file_path, disable_existing_loggers=False)
+    config_logging(workspace)
 
 
 def get_scope_info():

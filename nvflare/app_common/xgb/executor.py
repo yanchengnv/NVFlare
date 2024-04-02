@@ -18,7 +18,7 @@ from nvflare.apis.fl_constant import ReturnCode
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import Shareable, make_reply
 from nvflare.apis.signal import Signal
-from nvflare.app_common.xgb.adaptors.adaptor import XGBClientAdaptor
+from nvflare.app_common.xgb.adaptors.xgb_adaptor import XGBClientAdaptor
 from nvflare.fuel.f3.cellnet.fqcn import FQCN
 from nvflare.security.logging import secure_format_exception
 

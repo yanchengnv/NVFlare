@@ -12,23 +12,74 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import multiprocessing
+import os
+import sys
 import threading
 import time
 from abc import ABC, abstractmethod
 
 from nvflare.apis.fl_component import FLComponent
 from nvflare.apis.fl_context import FLContext
-from nvflare.apis.shareable import Shareable
 from nvflare.apis.signal import Signal
+from nvflare.apis.workspace import Workspace
 from nvflare.app_common.xgb.defs import Constant
-from nvflare.app_common.xgb.runners.xgb_runner import XGBRunner
-from nvflare.app_common.xgb.sender import Sender
-from nvflare.fuel.utils.validation_utils import check_non_negative_int, check_object_type, check_positive_int
+from nvflare.app_common.xgb.runners.xgb_runner import AppRunner
+from nvflare.fuel.utils.log_utils import add_log_file_handler, configure_logging
+from nvflare.fuel.utils.validation_utils import check_object_type
+from nvflare.security.logging import secure_format_exception, secure_log_traceback
 
 
-class XGBAdaptor(ABC, FLComponent):
+class _RunnerStarter:
+    """This small class is used to start XGB client runner. It is used when running the runner in a thread
+    or in a separate process.
+
     """
-    XGBAdaptors are used to integrate FLARE with XGBoost Target (Server or Client) in run time.
+
+    def __init__(self, app_name: str, runner, in_process: bool, workspace: Workspace, job_id: str):
+        self.app_name = app_name
+        self.runner = runner
+        self.in_process = in_process
+        self.workspace = workspace
+        self.job_id = job_id
+        self.error = None
+        self.started = True
+        self.stopped = False
+        self.exit_code = 0
+
+    def start(self, ctx: dict):
+        """Start the runner and wait for it to finish.
+
+        Args:
+            ctx:
+
+        Returns:
+
+        """
+        try:
+            if not self.in_process:
+                # enable logging
+                run_dir = self.workspace.get_run_dir(self.job_id)
+                log_file_name = os.path.join(run_dir, f"{self.app_name}_log.txt")
+                print(f"XGB Log: {log_file_name}")
+                configure_logging(self.workspace)
+                add_log_file_handler(log_file_name)
+            self.runner.run(ctx)
+            self.stopped = True
+        except Exception as e:
+            secure_log_traceback()
+            self.error = f"Exception starting {self.app_name} runner: {secure_format_exception(e)}"
+            self.started = False
+            self.exit_code = Constant.EXIT_CODE_CANT_START
+            self.stopped = True
+            if not self.in_process:
+                # this is a separate process
+                sys.exit(self.exit_code)
+
+
+class AppAdaptor(ABC, FLComponent):
+    """
+    AppAdaptors are used to integrate FLARE with App Target (Server or Client) in run time.
 
     For example, an XGB server could be run as a gRPC server process, or be run as part of the FLARE's FL server
     process. Similarly, an XGB client could be run as a gRPC client process, or be run as part of the
@@ -39,13 +90,17 @@ class XGBAdaptor(ABC, FLComponent):
     The XGBAdaptor class defines commonly required methods for all adaptor implementations.
     """
 
-    def __init__(self):
+    def __init__(self, app_name: str, in_process: bool):
         FLComponent.__init__(self)
         self.abort_signal = None
-        self.xgb_runner = None
+        self.app_runner = None
+        self.app_name = app_name
+        self.in_process = in_process
+        self.starter = None
+        self.process = None
 
-    def set_runner(self, runner: XGBRunner):
-        """Set the XGB Runner that will be used to run XGB processing logic.
+    def set_runner(self, runner: AppRunner):
+        """Set the App Runner that will be used to run app processing logic.
         Note that the adaptor is only responsible for starting the runner appropriately (in a thread or in a
         separate process).
 
@@ -55,9 +110,9 @@ class XGBAdaptor(ABC, FLComponent):
         Returns: None
 
         """
-        if not isinstance(runner, XGBRunner):
-            raise TypeError(f"runner must be XGBRunner but got {type(runner)}")
-        self.xgb_runner = runner
+        if not isinstance(runner, AppRunner):
+            raise TypeError(f"runner must be AppRunner but got {type(runner)}")
+        self.app_runner = runner
 
     def set_abort_signal(self, abort_signal: Signal):
         """Called by XGB Controller/Executor to set the abort_signal.
@@ -175,309 +230,64 @@ class XGBAdaptor(ABC, FLComponent):
         t = threading.Thread(target=self._monitor, args=(fl_ctx, target_stopped_cb), daemon=True)
         t.start()
 
-
-class XGBServerAdaptor(XGBAdaptor):
-    """
-    XGBServerAdaptor specifies commonly required methods for server adaptor implementations.
-    """
-
-    def __init__(self):
-        XGBAdaptor.__init__(self)
-        self.world_size = None
-
-    def configure(self, config: dict, fl_ctx: FLContext):
-        """Called by XGB Controller to configure the target.
-
-        The world_size is a required config parameter.
-
-        Args:
-            config: config data
-            fl_ctx: FL context
-
-        Returns: None
-
-        """
-        ws = config.get(Constant.CONF_KEY_WORLD_SIZE)
-        if not ws:
-            raise RuntimeError("world_size is not configured")
-
-        check_positive_int(Constant.CONF_KEY_WORLD_SIZE, ws)
-        self.world_size = ws
-
-    @abstractmethod
-    def all_gather(self, rank: int, seq: int, send_buf: bytes, fl_ctx: FLContext) -> bytes:
-        """Called by the XGB Controller to perform Allgather operation, per XGBoost spec.
-
-        Args:
-            rank: rank of the calling client
-            seq: sequence number of the request
-            send_buf: operation input data
-            fl_ctx: FL context
-
-        Returns: operation result
-
-        """
-        pass
-
-    @abstractmethod
-    def all_gather_v(self, rank: int, seq: int, send_buf: bytes, fl_ctx: FLContext) -> bytes:
-        """Called by the XGB Controller to perform AllgatherV operation, per XGBoost spec.
-
-        Args:
-            rank: rank of the calling client
-            seq: sequence number of the request
-            send_buf: input data
-            fl_ctx: FL context
-
-        Returns: operation result
-
-        """
-        pass
-
-    @abstractmethod
-    def all_reduce(
-        self,
-        rank: int,
-        seq: int,
-        data_type: int,
-        reduce_op: int,
-        send_buf: bytes,
-        fl_ctx: FLContext,
-    ) -> bytes:
-        """Called by the XGB Controller to perform Allreduce operation, per XGBoost spec.
-
-        Args:
-            rank: rank of the calling client
-            seq: sequence number of the request
-            data_type: data type of the input
-            reduce_op: reduce operation to be performed
-            send_buf: input data
-            fl_ctx: FL context
-
-        Returns: operation result
-
-        """
-        pass
-
-    @abstractmethod
-    def broadcast(self, rank: int, seq: int, root: int, send_buf: bytes, fl_ctx: FLContext) -> bytes:
-        """Called by the XGB Controller to perform Broadcast operation, per XGBoost spec.
-
-        Args:
-            rank: rank of the calling client
-            seq: sequence number of the request
-            root: root rank of the broadcast
-            send_buf: input data
-            fl_ctx: FL context
-
-        Returns: operation result
-
-        """
-        pass
-
-
-class XGBClientAdaptor(XGBAdaptor):
-    """
-    XGBClientAdaptor specifies commonly required methods for client adaptor implementations.
-    """
-
-    def __init__(self):
-        """Constructor of XGBClientAdaptor"""
-        XGBAdaptor.__init__(self)
-        self.engine = None
-        self.sender = None
-        self.stopped = False
-        self.rank = None
-        self.num_rounds = None
-        self.world_size = None
-
-    def set_sender(self, sender: Sender):
-        """Set the sender to be used to send XGB operation requests to the server.
-
-        Args:
-            sender: the sender to be set
-
-        Returns: None
-
-        """
-        if not isinstance(sender, Sender):
-            raise TypeError(f"sender must be Sender but got {type(sender)}")
-        self.sender = sender
-
-    def configure(self, config: dict, fl_ctx: FLContext):
-        """Called by XGB Executor to configure the target.
-
-        The rank, world size, and number of rounds are required config parameters.
-
-        Args:
-            config: config data
-            fl_ctx: FL context
-
-        Returns: None
-
-        """
-        ws = config.get(Constant.CONF_KEY_WORLD_SIZE)
-        if not ws:
-            raise RuntimeError("world_size is not configured")
-
-        check_positive_int(Constant.CONF_KEY_WORLD_SIZE, ws)
-        self.world_size = ws
-
-        rank = config.get(Constant.CONF_KEY_RANK)
-        if rank is None:
-            raise RuntimeError("rank is not configured")
-
-        check_non_negative_int(Constant.CONF_KEY_RANK, rank)
-        self.rank = rank
-
-        num_rounds = config.get(Constant.CONF_KEY_NUM_ROUNDS)
-        if num_rounds is None:
-            raise RuntimeError("num_rounds is not configured")
-
-        check_positive_int(Constant.CONF_KEY_NUM_ROUNDS, num_rounds)
-        self.num_rounds = num_rounds
-
-    def _send_request(self, op: str, req: Shareable) -> (bytes, Shareable):
-        """Send XGB operation request to the FL server via FLARE message.
-
-        Args:
-            op: the XGB operation
-            req: operation data
-
-        Returns: operation result
-
-        """
-        reply = self.sender.send_to_server(op, req, self.abort_signal)
-        if isinstance(reply, Shareable):
-            rcv_buf = reply.get(Constant.PARAM_KEY_RCV_BUF)
-            return rcv_buf, reply
+    def start_runner(self, run_ctx: dict, fl_ctx: FLContext):
+        engine = fl_ctx.get_engine()
+        workspace = engine.get_workspace()
+        job_id = fl_ctx.get_job_id()
+        starter = _RunnerStarter(self.app_name, self.app_runner, self.in_process, workspace, job_id)
+        if self.in_process:
+            self.logger.info(f"starting {self.app_name} Server in another thread")
+            t = threading.Thread(
+                target=starter.start,
+                args=(run_ctx,),
+                daemon=True,
+                name=f"{self.app_name}_server_thread_runner",
+            )
+            t.start()
+            if not starter.started:
+                self.logger.error(f"cannot start {self.app_name} server: {starter.error}")
+                raise RuntimeError(starter.error)
+            self.starter = starter
         else:
-            raise RuntimeError(f"invalid reply for op {op}: expect Shareable but got {type(reply)}")
+            # start as a separate local process
+            self.logger.info(f"starting {self.app_name} server in another process")
+            self.process = multiprocessing.Process(
+                target=starter.start,
+                args=(run_ctx,),
+                daemon=True,
+                name=f"{self.app_name}_server_process_runner",
+            )
+            self.process.start()
 
-    def _send_all_gather(self, rank: int, seq: int, send_buf: bytes) -> (bytes, Shareable):
-        """This method is called by a concrete client adaptor to send Allgather operation to the server.
+    def stop_runner(self):
+        if self.in_process:
+            runner = self.app_runner
+            self.app_runner = None
+            if runner:
+                runner.stop()
+        else:
+            p = self.process
+            self.process = None
+            if p:
+                p.kill()
 
-        Args:
-            rank: rank of the client
-            seq: sequence number of the request
-            send_buf: input data
+    def is_runner_stopped(self) -> (bool, int):
+        if self.in_process:
+            if self.starter:
+                if self.starter.stopped:
+                    return True, self.starter.exit_code
 
-        Returns: operation result
-
-        """
-        req = Shareable()
-        req[Constant.PARAM_KEY_RANK] = rank
-        req[Constant.PARAM_KEY_SEQ] = seq
-        req[Constant.PARAM_KEY_SEND_BUF] = send_buf
-        return self._send_request(Constant.OP_ALL_GATHER, req)
-
-    def _send_all_gather_v(self, rank: int, seq: int, send_buf: bytes, headers=None) -> (bytes, Shareable):
-        req = Shareable()
-        self._add_headers(req, headers)
-        req[Constant.PARAM_KEY_RANK] = rank
-        req[Constant.PARAM_KEY_SEQ] = seq
-        req[Constant.PARAM_KEY_SEND_BUF] = send_buf
-        return self._send_request(Constant.OP_ALL_GATHER_V, req)
-
-    def _do_all_gather_v(self, rank: int, seq: int, send_buf: bytes) -> (bytes, Shareable):
-        """This method is called by a concrete client adaptor to send AllgatherV operation to the server.
-
-        Args:
-            rank: rank of the client
-            seq: sequence number of the request
-            send_buf: operation input
-
-        Returns: operation result
-
-        """
-        fl_ctx = self.engine.new_context()
-        fl_ctx.set_prop(key=Constant.PARAM_KEY_RANK, value=rank, private=True, sticky=False)
-        fl_ctx.set_prop(key=Constant.PARAM_KEY_SEQ, value=seq, private=True, sticky=False)
-        fl_ctx.set_prop(key=Constant.PARAM_KEY_SEND_BUF, value=send_buf, private=True, sticky=False)
-        self.fire_event(Constant.EVENT_BEFORE_ALL_GATHER_V, fl_ctx)
-
-        send_buf = fl_ctx.get_prop(Constant.PARAM_KEY_SEND_BUF)
-        rcv_buf, reply = self._send_all_gather_v(
-            rank=rank,
-            seq=seq,
-            send_buf=send_buf,
-            headers=fl_ctx.get_prop(Constant.PARAM_KEY_HEADERS),
-        )
-
-        fl_ctx.set_prop(key=Constant.PARAM_KEY_RCV_BUF, value=rcv_buf, private=True, sticky=False)
-        fl_ctx.set_prop(key=Constant.PARAM_KEY_REPLY, value=reply, private=True, sticky=False)
-        self.fire_event(Constant.EVENT_AFTER_ALL_GATHER_V, fl_ctx)
-        return fl_ctx.get_prop(Constant.PARAM_KEY_RCV_BUF)
-
-    def _send_all_reduce(
-        self, rank: int, seq: int, data_type: int, reduce_op: int, send_buf: bytes
-    ) -> (bytes, Shareable):
-        """This method is called by a concrete client adaptor to send Allreduce operation to the server.
-
-        Args:
-            rank: rank of the client
-            seq: sequence number of the request
-            data_type: data type of the input
-            reduce_op: reduce operation to be performed
-            send_buf: operation input
-
-        Returns: operation result
-
-        """
-        req = Shareable()
-        req[Constant.PARAM_KEY_RANK] = rank
-        req[Constant.PARAM_KEY_SEQ] = seq
-        req[Constant.PARAM_KEY_DATA_TYPE] = data_type
-        req[Constant.PARAM_KEY_REDUCE_OP] = reduce_op
-        req[Constant.PARAM_KEY_SEND_BUF] = send_buf
-        return self._send_request(Constant.OP_ALL_REDUCE, req)
-
-    def _send_broadcast(self, rank: int, seq: int, root: int, send_buf: bytes, headers=None) -> (bytes, Shareable):
-        req = Shareable()
-        self._add_headers(req, headers)
-        req[Constant.PARAM_KEY_RANK] = rank
-        req[Constant.PARAM_KEY_SEQ] = seq
-        req[Constant.PARAM_KEY_ROOT] = root
-        req[Constant.PARAM_KEY_SEND_BUF] = send_buf
-        return self._send_request(Constant.OP_BROADCAST, req)
-
-    def _do_broadcast(self, rank: int, seq: int, root: int, send_buf: bytes) -> bytes:
-        """This method is called by a concrete client adaptor to send Broadcast operation to the server.
-
-        Args:
-            rank: rank of the client
-            seq: sequence number of the request
-            root: root rank of the broadcast
-            send_buf: operation input
-
-        Returns: operation result
-
-        """
-        fl_ctx = self.engine.new_context()
-        fl_ctx.set_prop(key=Constant.PARAM_KEY_RANK, value=rank, private=True, sticky=False)
-        fl_ctx.set_prop(key=Constant.PARAM_KEY_SEQ, value=seq, private=True, sticky=False)
-        fl_ctx.set_prop(key=Constant.PARAM_KEY_ROOT, value=root, private=True, sticky=False)
-        fl_ctx.set_prop(key=Constant.PARAM_KEY_SEND_BUF, value=send_buf, private=True, sticky=False)
-        self.fire_event(Constant.EVENT_BEFORE_BROADCAST, fl_ctx)
-
-        send_buf = fl_ctx.get_prop(Constant.PARAM_KEY_SEND_BUF)
-        rcv_buf, reply = self._send_broadcast(
-            rank=rank,
-            seq=seq,
-            root=root,
-            send_buf=send_buf,
-            headers=fl_ctx.get_prop(Constant.PARAM_KEY_HEADERS),
-        )
-
-        fl_ctx.set_prop(key=Constant.PARAM_KEY_RCV_BUF, value=rcv_buf, private=True, sticky=False)
-        fl_ctx.set_prop(key=Constant.PARAM_KEY_REPLY, value=reply, private=True, sticky=False)
-        self.fire_event(Constant.EVENT_AFTER_BROADCAST, fl_ctx)
-        return fl_ctx.get_prop(Constant.PARAM_KEY_RCV_BUF)
-
-    @staticmethod
-    def _add_headers(req: Shareable, headers: dict):
-        if not headers:
-            return
-
-        for k, v in headers.items():
-            req.set_header(k, v)
+            if self.app_runner:
+                return self.app_runner.is_stopped()
+            else:
+                return True, 0
+        else:
+            if self.process:
+                assert isinstance(self.process, multiprocessing.Process)
+                ec = self.process.exitcode
+                if ec is None:
+                    return False, 0
+                else:
+                    return True, ec
+            else:
+                return True, 0

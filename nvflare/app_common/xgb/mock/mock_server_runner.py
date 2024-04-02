@@ -14,10 +14,10 @@
 from nvflare.app_common.xgb.defs import Constant
 from nvflare.app_common.xgb.grpc_server import GrpcServer
 from nvflare.app_common.xgb.mock.aggr_servicer import AggrServicer
-from nvflare.app_common.xgb.runners.xgb_runner import XGBRunner
+from nvflare.app_common.xgb.runners.xgb_runner import AppRunner
 
 
-class MockServerRunner(XGBRunner):
+class MockServerRunner(AppRunner):
     def __init__(self, server_max_workers=10, aggr_timeout=10.0):
         self.server_max_workers = server_max_workers
         self.aggr_timeout = aggr_timeout

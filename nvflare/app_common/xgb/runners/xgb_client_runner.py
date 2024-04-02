@@ -20,14 +20,14 @@ from nvflare.apis.fl_component import FLComponent
 from nvflare.apis.fl_context import FLContext
 from nvflare.app_common.xgb.data_loader import XGBDataLoader
 from nvflare.app_common.xgb.defs import Constant
-from nvflare.app_common.xgb.runners.xgb_runner import XGBRunner
+from nvflare.app_common.xgb.runners.xgb_runner import AppRunner
 from nvflare.app_common.xgb.tb import TensorBoardCallback
 from nvflare.app_common.xgb.xgb_params import XGBoostParams
 from nvflare.fuel.utils.import_utils import optional_import
 from nvflare.fuel.utils.obj_utils import get_logger
 
 
-class XGBClientRunner(XGBRunner, FLComponent):
+class XGBClientRunner(AppRunner, FLComponent):
     def __init__(
         self,
         data_loader_id: str,

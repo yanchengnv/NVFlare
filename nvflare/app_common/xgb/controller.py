@@ -19,7 +19,7 @@ from nvflare.apis.fl_context import FLContext
 from nvflare.apis.impl.controller import ClientTask, Controller, Task
 from nvflare.apis.shareable import ReturnCode, Shareable, make_reply
 from nvflare.apis.signal import Signal
-from nvflare.app_common.xgb.adaptors.adaptor import XGBServerAdaptor
+from nvflare.app_common.xgb.adaptors.xgb_adaptor import XGBServerAdaptor
 from nvflare.fuel.utils.validation_utils import check_number_range, check_object_type, check_positive_number, check_str
 from nvflare.security.logging import secure_format_exception
 

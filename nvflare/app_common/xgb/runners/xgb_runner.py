@@ -16,9 +16,9 @@ from abc import ABC, abstractmethod
 from nvflare.apis.fl_context import FLContext
 
 
-class XGBRunner(ABC):
+class AppRunner(ABC):
 
-    """An XGBRunner implements XGB (server or client) processing logic."""
+    """An AppRunner implements App (server or client) processing logic."""
 
     def initialize(self, fl_ctx: FLContext):
         """Called by Controller/Executor to initialize the runner.
@@ -34,7 +34,7 @@ class XGBRunner(ABC):
 
     @abstractmethod
     def run(self, ctx: dict):
-        """Called to start the execution of XGB processing logic.
+        """Called to start the execution of app processing logic.
 
         Args:
             ctx: the contextual info to help the runner execution

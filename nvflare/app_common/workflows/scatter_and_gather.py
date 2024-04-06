@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import gc
 from typing import Any
 
 from nvflare.apis.client import Client
@@ -221,6 +222,8 @@ class ScatterAndGather(Controller):
                 if self._check_abort_signal(fl_ctx, abort_signal):
                     return
 
+                gc.collect()
+
                 self.log_info(fl_ctx, f"Round {self._current_round} started.")
                 fl_ctx.set_prop(AppConstants.GLOBAL_MODEL, self._global_weights, private=True, sticky=True)
                 fl_ctx.set_prop(AppConstants.CURRENT_ROUND, self._current_round, private=True, sticky=True)
@@ -333,6 +336,7 @@ class ScatterAndGather(Controller):
         self._accept_train_result(client_name=client_name, result=result, fl_ctx=fl_ctx)
 
         # Cleanup task result
+        gc.collect()
         client_task.result = None
 
     def process_result_of_unknown_task(

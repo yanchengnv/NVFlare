@@ -200,7 +200,7 @@ class ByteStreamer:
         error = errors.get(task.target)
         if error:
             msg = f"Message sending error to target {task.target}: {error}"
-            log.debug(msg)
+            log.info(msg)
             self._stop_task(task, StreamError(msg))
             return
 
@@ -218,8 +218,9 @@ class ByteStreamer:
             self.tx_task_map.pop(task.sid, None)
 
         if error:
-            log.debug(f"Stream error: {error}")
+            log.info(f"Stream error: {error}")
             if task.stream_future:
+                log.info("========== set stream_future")
                 task.stream_future.set_exception(error)
 
             if notify:

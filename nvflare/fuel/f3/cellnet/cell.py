@@ -16,6 +16,7 @@ import concurrent.futures
 import copy
 import logging
 import threading
+import time
 import uuid
 from typing import Dict, List, Union
 
@@ -235,13 +236,18 @@ class Cell(StreamCell):
     def _future_wait(self, future, timeout):
         last_progress = 0
         while not future.waiter.wait(timeout):
+            if future.error:
+                return False
             current_progress = future.get_progress()
             if last_progress == current_progress:
                 return False
             else:
                 self.logger.debug(f"{current_progress=}")
                 last_progress = current_progress
-        return True
+        if future.error:
+            return False
+        else:
+            return True
 
     def _encode_message(self, msg: Message):
         try:
@@ -294,61 +300,69 @@ class Cell(StreamCell):
         req_id = str(uuid.uuid4())
         request.add_headers({StreamHeaderKey.STREAM_REQ_ID: req_id})
 
-        # this future can be used to check sending progress, but not for checking return blob
-        self.logger.debug(f"{req_id=}, {channel=}, {topic=}, {target=}, {timeout=}: send_request about to send_blob")
-
         waiter = SimpleWaiter(req_id=req_id, result=make_reply(ReturnCode.TIMEOUT))
         self.requests_dict[req_id] = waiter
-        future = self.send_blob(
-            channel=channel, topic=topic, target=target, message=request, secure=secure, optional=optional
-        )
 
-        self.logger.debug(f"{req_id=}: Waiting starts")
+        # this future can be used to check sending progress, but not for checking return blob
+        self.logger.info(f"{req_id=}, {channel=}, {topic=}, {target=}, {timeout=} {wait_for_reply=}: send_request about to send_blob")
 
-        # Three stages, sending, waiting for receiving first byte, receiving
+        try:
+            future = self.send_blob(
+                channel=channel, topic=topic, target=target, message=request, secure=secure, optional=optional
+            )
 
-        # sending with progress timeout
-        self.logger.debug(f"{req_id=}: entering sending wait {timeout=}")
-        sending_complete = self._future_wait(future, timeout)
-        if not sending_complete:
-            self.logger.info(f"{req_id=}: sending timeout {timeout=}")
-            if wait_for_reply:
+            self.logger.debug(f"{req_id=}: Waiting starts")
+
+            # Three stages, sending, waiting for receiving first byte, receiving
+            # sending with progress timeout
+            self.logger.info(f"{req_id=}: entering sending wait {timeout=}")
+            sending_complete = self._future_wait(future, timeout)
+            if not sending_complete:
+                self.logger.info(f"{req_id=}: sending timeout {timeout=}")
+                if wait_for_reply:
+                    return self._get_result(req_id)
+                else:
+                    return False
+
+            self.logger.info(f"{req_id=}: sending complete")
+
+            # waiting for receiving first byte
+            self.logger.info(f"{req_id=}: entering remote process wait {timeout=}")
+            if not waiter.in_receiving.wait(timeout):
+                self.logger.info(f"{req_id=}: remote processing timeout {timeout=}")
+                if wait_for_reply:
+                    return self._get_result(req_id)
+                else:
+                    return False
+            self.logger.info(f"{req_id=}: in receiving")
+
+            if not wait_for_reply:
+                self.logger.info("got some reply - return")
+                return True
+
+            # receiving with progress timeout
+            r_future = waiter.receiving_future
+            self.logger.debug(f"{req_id=}: entering receiving wait {timeout=}")
+            receiving_complete = self._future_wait(r_future, timeout)
+            if not receiving_complete:
+                self.logger.info(f"{req_id=}: receiving timeout {timeout=}")
                 return self._get_result(req_id)
-            else:
-                return False
-        self.logger.debug(f"{req_id=}: sending complete")
-        if not wait_for_reply:
-            return True
-
-        # waiting for receiving first byte
-        self.logger.debug(f"{req_id=}: entering remote process wait {timeout=}")
-        if not waiter.in_receiving.wait(timeout):
-            self.logger.info(f"{req_id=}: remote processing timeout {timeout=}")
-            return self._get_result(req_id)
-        self.logger.debug(f"{req_id=}: in receiving")
-
-        # receiving with progress timeout
-        r_future = waiter.receiving_future
-        self.logger.debug(f"{req_id=}: entering receiving wait {timeout=}")
-        receiving_complete = self._future_wait(r_future, timeout)
-        if not receiving_complete:
-            self.logger.info(f"{req_id=}: receiving timeout {timeout=}")
-            return self._get_result(req_id)
-        self.logger.debug(f"{req_id=}: receiving complete")
-        waiter.result = Message(r_future.headers, r_future.result())
-        decode_payload(waiter.result, encoding_key=StreamHeaderKey.PAYLOAD_ENCODING)
-        self.logger.debug(f"{req_id=}: return result {waiter.result=}")
-        result = self._get_result(req_id)
-        return result
+            self.logger.debug(f"{req_id=}: receiving complete")
+            waiter.result = Message(r_future.headers, r_future.result())
+            decode_payload(waiter.result, encoding_key=StreamHeaderKey.PAYLOAD_ENCODING)
+            self.logger.debug(f"{req_id=}: return result {waiter.result=}")
+            result = self._get_result(req_id)
+            return result
+        finally:
+            self.requests_dict.pop(req_id, None)
 
     def _process_reply(self, future: StreamFuture):
         headers = future.headers
         req_id = headers.get(StreamHeaderKey.STREAM_REQ_ID, -1)
         self.logger.debug(f"{req_id=}: _process_reply")
-        try:
-            waiter = self.requests_dict[req_id]
-        except KeyError as e:
-            self.logger.warning(f"Receiving unknown {req_id=}, discarded: {e}")
+        waiter = self.requests_dict.get(req_id)
+        if not waiter:
+            self.logger.warning(f"discarded reply for unknown request: {req_id=}")
             return
         waiter.receiving_future = future
         waiter.in_receiving.set()

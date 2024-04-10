@@ -15,14 +15,16 @@ from typing import Dict, List
 
 import pytest
 
-from nvflare.app_common.xgb.sec.dam import DamEncoder, DamDecoder
+from nvflare.app_common.xgb.sec.dam import DamDecoder, DamEncoder
 from nvflare.app_common.xgb.sec.data_converter import FeatureAggregationResult
-from nvflare.app_common.xgb.sec.processor_data_converter import ProcessorDataConverter, DATA_SET_GH_PAIRS, \
-    DATA_SET_AGGREGATION_WITH_FEATURES
+from nvflare.app_common.xgb.sec.processor_data_converter import (
+    DATA_SET_AGGREGATION_WITH_FEATURES,
+    DATA_SET_GH_PAIRS,
+    ProcessorDataConverter,
+)
 
 
 class TestDataConverter:
-
     @pytest.fixture()
     def data_converter(self):
         yield ProcessorDataConverter()
@@ -30,8 +32,7 @@ class TestDataConverter:
     @pytest.fixture()
     def gh_buffer(self):
 
-        gh = [0.1, 0.2, 1.2, 1.2, 2.1, 2.2, 3.1, 3.2, 4.1, 4.2,
-              5.1, 5.2, 6.1, 6.2, 7.1, 7.2, 8.1, 8.2, 9.1, 9.2]
+        gh = [0.1, 0.2, 1.2, 1.2, 2.1, 2.2, 3.1, 3.2, 4.1, 4.2, 5.1, 5.2, 6.1, 6.2, 7.1, 7.2, 8.1, 8.2, 9.1, 9.2]
 
         encoder = DamEncoder(DATA_SET_GH_PAIRS)
         encoder.add_float_array(gh)
@@ -49,16 +50,26 @@ class TestDataConverter:
         encoder.add_int_array(features)
 
         slots = [
-            0, 5,
-            1, 9,
-            1, 6,
-            0, 7,
-            0, 9,
-            0, 8,
-            1, 5,
-            0, 6,
-            0, 8,
-            1, 5,
+            0,
+            5,
+            1,
+            9,
+            1,
+            6,
+            0,
+            7,
+            0,
+            9,
+            0,
+            8,
+            1,
+            5,
+            0,
+            6,
+            0,
+            8,
+            1,
+            5,
         ]
         encoder.add_int_array(slots)
 
@@ -113,4 +124,3 @@ class TestDataConverter:
 
         histo2 = decoder.decode_float_array()
         assert histo2 == [1.1, 1.2, 2.1, 2.2, 3.1, 3.2, 4.1, 4.2, 5.1, 5.2]
-

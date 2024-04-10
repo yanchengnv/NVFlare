@@ -26,7 +26,6 @@ DATA_TYPE_FLOAT_ARRAY = 258
 
 
 class DamEncoder:
-
     def __init__(self, data_set_id: int):
         self.data_set_id = data_set_id
         self.entries = []
@@ -42,7 +41,7 @@ class DamEncoder:
         size = PREFIX_LEN
         for entry in self.entries:
             size += 16
-            size += len(entry)*8
+            size += len(entry) * 8
 
         self.write_str(SIGNATURE)
         self.write_int64(size)
@@ -61,7 +60,6 @@ class DamEncoder:
 
         return self.buffer.getvalue()
 
-
     def write_int64(self, value: int):
         self.buffer.write(struct.pack("q", value))
 
@@ -73,7 +71,6 @@ class DamEncoder:
 
 
 class DamDecoder:
-
     def __init__(self, buffer: bytes):
         self.buffer = buffer
         self.pos = 0
@@ -99,7 +96,7 @@ class DamDecoder:
 
         return result
 
-    def decode_float_array(self) :
+    def decode_float_array(self):
         data_type = self.read_int64()
         if data_type != DATA_TYPE_FLOAT_ARRAY:
             raise RuntimeError("Invalid data type for float array")
@@ -112,17 +109,16 @@ class DamDecoder:
         return result
 
     def read_string(self, length: int) -> str:
-        result = self.buffer[self.pos:self.pos + length].decode("utf-8")
+        result = self.buffer[self.pos : self.pos + length].decode("utf-8")
         self.pos += length
         return result
 
-
     def read_int64(self) -> int:
-        result, = struct.unpack_from("q", self.buffer, self.pos)
+        (result,) = struct.unpack_from("q", self.buffer, self.pos)
         self.pos += 8
         return result
 
     def read_float(self) -> float:
-        result, = struct.unpack_from("d", self.buffer, self.pos)
+        (result,) = struct.unpack_from("d", self.buffer, self.pos)
         self.pos += 8
         return result

@@ -15,8 +15,12 @@ from typing import Dict, List, Tuple
 
 from nvflare.apis.fl_context import FLContext
 from nvflare.app_common.xgb.sec.dam import DamDecoder, DamEncoder
-from nvflare.app_common.xgb.sec.data_converter import FeatureContext, AggregationContext, FeatureAggregationResult, \
-    DataConverter
+from nvflare.app_common.xgb.sec.data_converter import (
+    AggregationContext,
+    DataConverter,
+    FeatureAggregationResult,
+    FeatureContext,
+)
 
 DATA_SET_GH_PAIRS = 1
 DATA_SET_AGGREGATION = 2
@@ -27,7 +31,6 @@ SCALE_FACTOR = 1000000.0  # Preserve 6 decimal places
 
 
 class ProcessorDataConverter(DataConverter):
-
     def __init__(self):
         super().__init__()
         self.features = []
@@ -44,11 +47,10 @@ class ProcessorDataConverter(DataConverter):
 
         float_array = decoder.decode_float_array()
         result = []
-        self.num_samples = int(len(float_array)/2)
+        self.num_samples = int(len(float_array) / 2)
 
         for i in range(self.num_samples):
-            result.append((self.float_to_int(float_array[2*i]),
-                           self.float_to_int(float_array[2*i + 1])))
+            result.append((self.float_to_int(float_array[2 * i]), self.float_to_int(float_array[2 * i + 1])))
 
         return result
 
@@ -66,7 +68,7 @@ class ProcessorDataConverter(DataConverter):
             for i in range(num):
                 bin_assignment = []
                 for row_id in range(self.num_samples):
-                    _, bin_num = self.slot_to_bin(cuts, slots[row_id*num + i])
+                    _, bin_num = self.slot_to_bin(cuts, slots[row_id * num + i])
                     bin_assignment.append(bin_num)
 
                 bin_size = self.get_bin_size(cuts, self.feature_list[i])
@@ -87,7 +89,7 @@ class ProcessorDataConverter(DataConverter):
         self, aggr_results: Dict[int, List[FeatureAggregationResult]], fl_ctx: FLContext
     ) -> bytes:
         encoder = DamEncoder(DATA_SET_AGGREGATION_RESULT)
-        node_list = sorted(aggr_results.keys());
+        node_list = sorted(aggr_results.keys())
         encoder.add_int_array(node_list)
 
         for node in node_list:
@@ -99,7 +101,7 @@ class ProcessorDataConverter(DataConverter):
 
     @staticmethod
     def get_bin_size(cuts: [int], feature_id: int) -> int:
-        return cuts[feature_id+1] - cuts[feature_id]
+        return cuts[feature_id + 1] - cuts[feature_id]
 
     @staticmethod
     def slot_to_bin(cuts: [int], slot: int) -> Tuple[int, int]:
@@ -113,17 +115,16 @@ class ProcessorDataConverter(DataConverter):
 
         raise RuntimeError(f"Logic error. Slot {slot}, out of range [0-{cuts[-1] - 1}]")
 
-
     @staticmethod
     def float_to_int(value: float) -> int:
-        return int(value*SCALE_FACTOR)
+        return int(value * SCALE_FACTOR)
 
     @staticmethod
     def int_to_float(value: int) -> float:
-        return value/SCALE_FACTOR
+        return value / SCALE_FACTOR
 
     @staticmethod
-    def find_histo_for_feature(result_list: List[FeatureAggregationResult], feature_id: int ) -> List[float]:
+    def find_histo_for_feature(result_list: List[FeatureAggregationResult], feature_id: int) -> List[float]:
         for result in result_list:
             if result.feature_id == feature_id:
                 float_array = []

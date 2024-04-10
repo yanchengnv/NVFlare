@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from nvflare.app_common.xgb.sec.dam import DamEncoder, DamDecoder
+from nvflare.app_common.xgb.sec.dam import DamDecoder, DamEncoder
 
 DATA_SET = 123456
 INT_ARRAY = [123, 456, 789]
@@ -19,7 +19,6 @@ FLOAT_ARRAY = [1.2, 2.3, 3.4, 4.5]
 
 
 class TestDam:
-
     def test_encode_decode(self):
         encoder = DamEncoder(DATA_SET)
         encoder.add_int_array(INT_ARRAY)

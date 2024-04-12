@@ -40,7 +40,7 @@ class ProcessorDataConverter(DataConverter):
     def decode_gh_pairs(self, buffer: bytes, fl_ctx: FLContext) -> List[Tuple[int, int]]:
         decoder = DamDecoder(buffer)
         if not decoder.is_valid():
-            raise RuntimeError("GH Buffer is not properly encoded")
+            return None
 
         if decoder.get_data_set_id() != DATA_SET_GH_PAIRS:
             raise RuntimeError(f"Data is not for GH Pairs: {decoder.get_data_set_id()}")
@@ -57,7 +57,7 @@ class ProcessorDataConverter(DataConverter):
     def decode_aggregation_context(self, buffer: bytes, fl_ctx: FLContext) -> AggregationContext:
         decoder = DamDecoder(buffer)
         if not decoder.is_valid():
-            raise RuntimeError("Aggregation Buffer is not properly encoded")
+            return None
         data_set_id = decoder.get_data_set_id()
         cuts = decoder.decode_int_array()
 

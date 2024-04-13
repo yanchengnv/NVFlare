@@ -80,7 +80,9 @@ class GrpcClient:
             send_buffer=data,
         )
 
+        self.logger.info(f"Allgather is sending {len(data)} bytes Rank: {rank} Seq: {seq_num}")
         result = self.stub.Allgather(req)
+
         if not isinstance(result, pb2.AllgatherReply):
             self.logger.error(f"expect reply to be pb2.AllgatherReply but got {type(result)}")
             return None

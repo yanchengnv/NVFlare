@@ -65,9 +65,10 @@ class ProcessorDataConverter(DataConverter):
             self.feature_list = decoder.decode_int_array()
             num = len(self.feature_list)
             slots = decoder.decode_int_array()
+            num_samples = int(len(slots)/num)
             for i in range(num):
                 bin_assignment = []
-                for row_id in range(self.num_samples):
+                for row_id in range(num_samples):
                     _, bin_num = self.slot_to_bin(cuts, slots[row_id * num + i])
                     bin_assignment.append(bin_num)
 
@@ -91,11 +92,12 @@ class ProcessorDataConverter(DataConverter):
         encoder = DamEncoder(DATA_SET_AGGREGATION_RESULT)
         node_list = sorted(aggr_results.keys())
         encoder.add_int_array(node_list)
-
         for node in node_list:
             result_list = aggr_results.get(node)
-            for f in self.feature_list:
-                encoder.add_float_array(self.find_histo_for_feature(result_list, f))
+            feature_list = [result.feature_id for result in result_list]
+            encoder.add_int_array(feature_list)
+            for result in result_list:
+                encoder.add_float_array(self.to_float_array(result))
 
         return encoder.finish()
 
@@ -124,14 +126,11 @@ class ProcessorDataConverter(DataConverter):
         return value / SCALE_FACTOR
 
     @staticmethod
-    def find_histo_for_feature(result_list: List[FeatureAggregationResult], feature_id: int) -> List[float]:
-        for result in result_list:
-            if result.feature_id == feature_id:
-                float_array = []
-                for (g, h) in result.aggregated_hist:
-                    float_array.append(ProcessorDataConverter.int_to_float(g))
-                    float_array.append(ProcessorDataConverter.int_to_float(h))
+    def to_float_array(result: FeatureAggregationResult) -> List[float]:
+        float_array = []
+        for (g, h) in result.aggregated_hist:
+            float_array.append(ProcessorDataConverter.int_to_float(g))
+            float_array.append(ProcessorDataConverter.int_to_float(h))
 
-                return float_array
+        return float_array
 
-        raise RuntimeError(f"Logic error. Feature {feature_id} not found in the list")

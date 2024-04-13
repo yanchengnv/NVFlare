@@ -26,7 +26,7 @@ void print_buffer(uint8_t *buffer, int size) {
 }
 
 // DamEncoder ======
-void DamEncoder::AddFloatArray(std::vector<double> value) {
+void DamEncoder::AddFloatArray(std::vector<double> &value) {
     if (encoded) {
         std::cout << "Buffer is already encoded" << std::endl;
         return;
@@ -38,15 +38,17 @@ void DamEncoder::AddFloatArray(std::vector<double> value) {
     entries->push_back(new Entry(kDataTypeFloatArray, buffer, value.size()));
 }
 
-void  DamEncoder::AddIntArray(std::vector<int64_t> value) {
+void  DamEncoder::AddIntArray(std::vector<int64_t> &value) {
+    std::cout << "AddIntArray called, size:  " << value.size() << std::endl;
     if (encoded) {
         std::cout << "Buffer is already encoded" << std::endl;
         return;
     }
     auto buf_size = value.size()*8;
+    std::cout << "Allocating " << buf_size << " bytes" << std::endl;
     uint8_t *buffer = static_cast<uint8_t *>(malloc(buf_size));
     memcpy(buffer, value.data(), buf_size);
-    // print_buffer(reinterpret_cast<uint8_t *>(value.data()), value.size() * 8);
+    // print_buffer(buffer, buf_size);
     entries->push_back(new Entry(kDataTypeIntArray, buffer, value.size()));
 }
 
@@ -99,8 +101,13 @@ DamDecoder::DamDecoder(std::uint8_t *buffer, std::size_t size) {
     this->buffer = buffer;
     this->buf_size = size;
     this->pos = buffer + kPrefixLen;
-    memcpy(&len, buffer + 8, 8);
-    memcpy(&data_set_id, buffer + 16, 8);
+    if (size >= kPrefixLen) {
+        memcpy(&len, buffer + 8, 8);
+        memcpy(&data_set_id, buffer + 16, 8);
+    } else {
+        len = 0;
+        data_set_id = 0;
+    }
 }
 
 bool DamDecoder::IsValid() {

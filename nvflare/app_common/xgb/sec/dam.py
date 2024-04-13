@@ -41,7 +41,7 @@ class DamEncoder:
         size = PREFIX_LEN
         for entry in self.entries:
             size += 16
-            size += len(entry) * 8
+            size += len(entry[1]) * 8
 
         self.write_str(SIGNATURE)
         self.write_int64(size)
@@ -74,9 +74,14 @@ class DamDecoder:
     def __init__(self, buffer: bytes):
         self.buffer = buffer
         self.pos = 0
-        self.signature = self.read_string(8)
-        self.size = self.read_int64()
-        self.data_set_id = self.read_int64()
+        if len(buffer) >= PREFIX_LEN:
+            self.signature = self.read_string(8)
+            self.size = self.read_int64()
+            self.data_set_id = self.read_int64()
+        else:
+            self.signature = None
+            self.size = 0
+            self.data_set_id = 0
 
     def is_valid(self):
         return self.signature == SIGNATURE
@@ -109,7 +114,7 @@ class DamDecoder:
         return result
 
     def read_string(self, length: int) -> str:
-        result = self.buffer[self.pos : self.pos + length].decode("utf-8")
+        result = self.buffer[self.pos : self.pos + length].decode("latin1")
         self.pos += length
         return result
 

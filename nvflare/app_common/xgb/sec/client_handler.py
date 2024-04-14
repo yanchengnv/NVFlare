@@ -168,8 +168,9 @@ class ClientSecurityHandler(SecurityHandler):
                 )
             return
 
-        self.info(fl_ctx,
-                  f"_process_before_all_gather_v: non-label client - do encrypted aggr for {len(groups)} groups")
+        self.info(
+            fl_ctx, f"_process_before_all_gather_v: non-label client - do encrypted aggr for {len(groups)} groups"
+        )
         start = time.time()
         aggr_result = self.adder.add(self.encrypted_ghs, self.feature_masks, groups, encode_sum=True)
         self.info(fl_ctx, f"got aggr result for {len(aggr_result)} features in {time.time()-start} secs")

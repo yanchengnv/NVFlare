@@ -65,7 +65,7 @@ class ProcessorDataConverter(DataConverter):
             self.feature_list = decoder.decode_int_array()
             num = len(self.feature_list)
             slots = decoder.decode_int_array()
-            num_samples = int(len(slots)/num)
+            num_samples = int(len(slots) / num)
             for i in range(num):
                 bin_assignment = []
                 for row_id in range(num_samples):
@@ -133,4 +133,3 @@ class ProcessorDataConverter(DataConverter):
             float_array.append(ProcessorDataConverter.int_to_float(h))
 
         return float_array
-

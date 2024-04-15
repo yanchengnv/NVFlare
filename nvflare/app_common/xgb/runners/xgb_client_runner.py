@@ -97,7 +97,7 @@ class XGBClientRunner(AppRunner, FLComponent):
         self._world_size = ctx.get(Constant.RUNNER_CTX_WORLD_SIZE)
         self._num_rounds = ctx.get(Constant.RUNNER_CTX_NUM_ROUNDS)
         self._server_addr = ctx.get(Constant.RUNNER_CTX_SERVER_ADDR)
-        self._data_loader = ctx.get(Constant.RUNNER_CTX_DATA_LOADER)
+        # self._data_loader = ctx.get(Constant.RUNNER_CTX_DATA_LOADER)
         self._tb_dir = ctx.get(Constant.RUNNER_CTX_TB_DIR)
         self._model_dir = ctx.get(Constant.RUNNER_CTX_MODEL_DIR)
 

@@ -20,7 +20,6 @@ from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import Shareable
 from nvflare.app_common.xgb.aggr import Aggregator
 from nvflare.app_common.xgb.defs import Constant
-from nvflare.app_common.xgb.mock.mock_data_converter import MockDataConverter
 from nvflare.app_common.xgb.paillier.adder import Adder
 from nvflare.app_common.xgb.paillier.decrypter import Decrypter
 from nvflare.app_common.xgb.paillier.encryptor import Encryptor
@@ -34,6 +33,7 @@ from nvflare.app_common.xgb.paillier.util import (
     split,
 )
 from nvflare.app_common.xgb.sec.data_converter import FeatureAggregationResult
+from nvflare.app_common.xgb.sec.processor_data_converter import ProcessorDataConverter
 from nvflare.app_common.xgb.sec.sec_handler import SecurityHandler
 
 
@@ -47,7 +47,7 @@ class ClientSecurityHandler(SecurityHandler):
         self.encryptor = None
         self.adder = None
         self.decrypter = None
-        self.data_converter = MockDataConverter()
+        self.data_converter = ProcessorDataConverter()
         self.encrypted_ghs = None
         self.clear_ghs = None  # for label client: list of tuples (g, h)
         self.original_gh_buffer = None
@@ -168,7 +168,9 @@ class ClientSecurityHandler(SecurityHandler):
                 )
             return
 
-        self.info(fl_ctx, f"_process_before_all_gather_v: non-label client - do encrypted aggr for grp {groups}")
+        self.info(
+            fl_ctx, f"_process_before_all_gather_v: non-label client - do encrypted aggr for {len(groups)} groups"
+        )
         start = time.time()
         aggr_result = self.adder.add(self.encrypted_ghs, self.feature_masks, groups, encode_sum=True)
         self.info(fl_ctx, f"got aggr result for {len(aggr_result)} features in {time.time()-start} secs")

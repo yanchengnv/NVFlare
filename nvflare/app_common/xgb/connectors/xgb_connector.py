@@ -1,24 +1,30 @@
 from abc import abstractmethod
 
 from nvflare.apis.fl_context import FLContext
-from nvflare.apis.shareable import Shareable
+from nvflare.apis.shareable import Shareable, make_reply, ReturnCode
+from nvflare.apis.signal import Signal
+from nvflare.app_common.tie.connector import Connector
 from nvflare.app_common.xgb.defs import Constant
-from nvflare.app_common.xgb.sender import Sender
 from nvflare.fuel.utils.validation_utils import check_non_negative_int, check_positive_int
-
-from .adaptor import AppAdaptor
 
 XGB_APP_NAME = "XGBoost"
 
 
-class XGBServerAdaptor(AppAdaptor):
+class XGBServerConnector(Connector):
     """
     XGBServerAdaptor specifies commonly required methods for server adaptor implementations.
     """
 
     def __init__(self, in_process):
-        AppAdaptor.__init__(self, XGB_APP_NAME, in_process)
+        Connector.__init__(self, XGB_APP_NAME, in_process)
         self.world_size = None
+        # set up operation handlers
+        self.op_table = {
+            Constant.OP_ALL_GATHER: self._process_all_gather,
+            Constant.OP_ALL_GATHER_V: self._process_all_gather_v,
+            Constant.OP_ALL_REDUCE: self._process_all_reduce,
+            Constant.OP_BROADCAST: self._process_broadcast,
+        }
 
     def configure(self, config: dict, fl_ctx: FLContext):
         """Called by XGB Controller to configure the target.
@@ -38,6 +44,110 @@ class XGBServerAdaptor(AppAdaptor):
 
         check_positive_int(Constant.CONF_KEY_WORLD_SIZE, ws)
         self.world_size = ws
+
+    def _process_all_gather(self, request: Shareable, fl_ctx: FLContext) -> Shareable:
+        """This is the op handler for Allgather.
+
+        Args:
+            request: the request containing op params
+            fl_ctx: FL context
+
+        Returns: a Shareable containing operation result
+
+        """
+        rank = request.get(Constant.PARAM_KEY_RANK)
+        seq = request.get(Constant.PARAM_KEY_SEQ)
+        send_buf = request.get(Constant.PARAM_KEY_SEND_BUF)
+        rcv_buf = self.all_gather(rank, seq, send_buf, fl_ctx)
+        reply = Shareable()
+        reply[Constant.PARAM_KEY_RCV_BUF] = rcv_buf
+        return reply
+
+    def _process_all_gather_v(self, request: Shareable, fl_ctx: FLContext) -> Shareable:
+        """This is the op handler for AllgatherV.
+
+        Args:
+            request: the request containing op params
+            fl_ctx: FL context
+
+        Returns: a Shareable containing operation result
+
+        """
+        rank = request.get(Constant.PARAM_KEY_RANK)
+        seq = request.get(Constant.PARAM_KEY_SEQ)
+        send_buf = request.get(Constant.PARAM_KEY_SEND_BUF)
+
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_RANK, value=rank, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_SEQ, value=seq, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_SEND_BUF, value=send_buf, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_REQUEST, value=request, private=True, sticky=False)
+        self.fire_event(Constant.EVENT_BEFORE_ALL_GATHER_V, fl_ctx)
+
+        send_buf = fl_ctx.get_prop(Constant.PARAM_KEY_SEND_BUF)
+
+        rcv_buf = self.all_gather_v(rank, seq, send_buf, fl_ctx)
+        reply = Shareable()
+
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_REPLY, value=reply, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_RCV_BUF, value=rcv_buf, private=True, sticky=False)
+        self.fire_event(Constant.EVENT_AFTER_ALL_GATHER_V, fl_ctx)
+        rcv_buf = fl_ctx.get_prop(Constant.PARAM_KEY_RCV_BUF)
+
+        reply[Constant.PARAM_KEY_RCV_BUF] = rcv_buf
+        return reply
+
+    def _process_all_reduce(self, request: Shareable, fl_ctx: FLContext) -> Shareable:
+        """This is the op handler for Allreduce.
+
+        Args:
+            request: the request containing op params
+            fl_ctx: FL context
+
+        Returns: a Shareable containing operation result
+
+        """
+        rank = request.get(Constant.PARAM_KEY_RANK)
+        seq = request.get(Constant.PARAM_KEY_SEQ)
+        send_buf = request.get(Constant.PARAM_KEY_SEND_BUF)
+        data_type = request.get(Constant.PARAM_KEY_DATA_TYPE)
+        reduce_op = request.get(Constant.PARAM_KEY_REDUCE_OP)
+        rcv_buf = self.all_reduce(rank, seq, data_type, reduce_op, send_buf, fl_ctx)
+        reply = Shareable()
+        reply[Constant.PARAM_KEY_RCV_BUF] = rcv_buf
+        return reply
+
+    def _process_broadcast(self, request: Shareable, fl_ctx: FLContext) -> Shareable:
+        """This is the op handler for Broadcast.
+
+        Args:
+            request: the request containing op params
+            fl_ctx: FL context
+
+        Returns: a Shareable containing operation result
+
+        """
+        rank = request.get(Constant.PARAM_KEY_RANK)
+        seq = request.get(Constant.PARAM_KEY_SEQ)
+        send_buf = request.get(Constant.PARAM_KEY_SEND_BUF)
+        root = request.get(Constant.PARAM_KEY_ROOT)
+
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_RANK, value=rank, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_SEQ, value=seq, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_ROOT, value=root, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_SEND_BUF, value=send_buf, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_REQUEST, value=request, private=True, sticky=False)
+        self.fire_event(Constant.EVENT_BEFORE_BROADCAST, fl_ctx)
+
+        send_buf = fl_ctx.get_prop(Constant.PARAM_KEY_SEND_BUF)
+        rcv_buf = self.broadcast(rank, seq, root, send_buf, fl_ctx)
+        reply = Shareable()
+
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_REPLY, value=reply, private=True, sticky=False)
+        fl_ctx.set_prop(key=Constant.PARAM_KEY_RCV_BUF, value=rcv_buf, private=True, sticky=False)
+        self.fire_event(Constant.EVENT_AFTER_BROADCAST, fl_ctx)
+        rcv_buf = fl_ctx.get_prop(Constant.PARAM_KEY_RCV_BUF)
+        reply[Constant.PARAM_KEY_RCV_BUF] = rcv_buf
+        return reply
 
     @abstractmethod
     def all_gather(self, rank: int, seq: int, send_buf: bytes, fl_ctx: FLContext) -> bytes:
@@ -110,34 +220,41 @@ class XGBServerAdaptor(AppAdaptor):
         """
         pass
 
+    def process_app_request(self, op: str, request: Shareable, fl_ctx: FLContext, abort_signal: Signal):
+        stopped, ec = self._is_stopped()
+        if stopped:
+            raise RuntimeError(f"dropped XGB request '{op}' since connector is already stopped {ec=}")
 
-class XGBClientAdaptor(AppAdaptor):
+        # find and call the op handlers
+        process_f = self.op_table.get(op)
+        if process_f is None:
+            raise RuntimeError(f"invalid op '{op}' from XGB request")
+
+        if not callable(process_f):
+            # impossible but we must declare process_f to be callable; otherwise PyCharm will complain about
+            # process_f(request, fl_ctx).
+            raise RuntimeError(f"op handler for {op} is not callable")
+
+        reply = process_f(request, fl_ctx)
+        self.log_info(fl_ctx, f"received reply for '{op}'")
+        reply.set_header(Constant.MSG_KEY_XGB_OP, op)
+        return reply
+
+
+class XGBClientConnector(Connector):
     """
-    XGBClientAdaptor specifies commonly required methods for client adaptor implementations.
+    XGBClientConnector specifies commonly required methods for client connector implementations.
     """
 
-    def __init__(self, in_process):
+    def __init__(self, in_process, per_msg_timeout, tx_timeout):
         """Constructor of XGBClientAdaptor"""
-        AppAdaptor.__init__(self, XGB_APP_NAME, in_process)
-        self.engine = None
-        self.sender = None
+        Connector.__init__(self, XGB_APP_NAME, in_process)
+        self.per_msg_timeout = per_msg_timeout
+        self.tx_timeout = tx_timeout
         self.stopped = False
         self.rank = None
         self.num_rounds = None
         self.world_size = None
-
-    def set_sender(self, sender: Sender):
-        """Set the sender to be used to send XGB operation requests to the server.
-
-        Args:
-            sender: the sender to be set
-
-        Returns: None
-
-        """
-        if not isinstance(sender, Sender):
-            raise TypeError(f"sender must be Sender but got {type(sender)}")
-        self.sender = sender
 
     def configure(self, config: dict, fl_ctx: FLContext):
         """Called by XGB Executor to configure the target.
@@ -182,12 +299,22 @@ class XGBClientAdaptor(AppAdaptor):
         Returns: operation result
 
         """
-        reply = self.sender.send_to_server(op, req, self.abort_signal)
-        if isinstance(reply, Shareable):
-            rcv_buf = reply.get(Constant.PARAM_KEY_RCV_BUF)
-            return rcv_buf, reply
-        else:
+        reply = self.send_request(
+            op=op,
+            target=None,  # server
+            request=req,
+            per_msg_timeout=self.per_msg_timeout,
+            tx_timeout=self.tx_timeout,
+            fl_ctx=None,
+        )
+        if not isinstance(reply, Shareable):
             raise RuntimeError(f"invalid reply for op {op}: expect Shareable but got {type(reply)}")
+
+        rc = reply.get_return_code()
+        if rc != ReturnCode.OK:
+            raise RuntimeError(f"error reply for op {op}: {rc=}")
+        rcv_buf = reply.get(Constant.PARAM_KEY_RCV_BUF)
+        return rcv_buf, reply
 
     def _send_all_gather(self, rank: int, seq: int, send_buf: bytes) -> (bytes, Shareable):
         """This method is called by a concrete client adaptor to send Allgather operation to the server.

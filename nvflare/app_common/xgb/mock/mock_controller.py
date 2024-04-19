@@ -13,13 +13,12 @@
 # limitations under the License.
 
 from nvflare.apis.fl_context import FLContext
-from nvflare.app_common.xgb.adaptors.grpc_server_adaptor import GrpcServerAdaptor
-from nvflare.app_common.xgb.controller import XGBController
+from nvflare.app_common.xgb.fed_controller import XGBFedController
 from nvflare.app_common.xgb.defs import Constant
-from nvflare.app_common.xgb.mock.mock_server_runner import MockServerRunner
+from nvflare.app_common.xgb.mock.mock_server_applet import MockServerApplet
 
 
-class MockXGBController(XGBController):
+class MockXGBController(XGBFedController):
     def __init__(
         self,
         num_rounds: int,
@@ -32,12 +31,10 @@ class MockXGBController(XGBController):
         progress_timeout: float = Constant.WORKFLOW_PROGRESS_TIMEOUT,
         client_ranks=None,
         aggr_timeout=10.0,
-        int_client_grpc_options=None,
         in_process=True,
     ):
-        XGBController.__init__(
+        XGBFedController.__init__(
             self,
-            adaptor_component_id="",
             num_rounds=num_rounds,
             configure_task_name=configure_task_name,
             configure_task_timeout=configure_task_timeout,
@@ -47,17 +44,9 @@ class MockXGBController(XGBController):
             max_client_op_interval=max_client_op_interval,
             progress_timeout=progress_timeout,
             client_ranks=client_ranks,
+            in_process=in_process,
         )
         self.aggr_timeout = aggr_timeout
-        self.int_client_grpc_options = int_client_grpc_options
-        self.in_process = in_process
 
-    def get_adaptor(self, fl_ctx: FLContext):
-        runner = MockServerRunner(aggr_timeout=self.aggr_timeout)
-        runner.initialize(fl_ctx)
-        adaptor = GrpcServerAdaptor(
-            int_client_grpc_options=self.int_client_grpc_options,
-            in_process=self.in_process,
-        )
-        adaptor.set_runner(runner)
-        return adaptor
+    def get_applet(self, fl_ctx: FLContext):
+        return MockServerApplet(aggr_timeout=self.aggr_timeout)

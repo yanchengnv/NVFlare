@@ -12,32 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from nvflare.apis.fl_context import FLContext
-from nvflare.app_common.xgb.adaptors.grpc_client_adaptor import GrpcClientAdaptor
-from nvflare.app_common.xgb.executor import XGBExecutor
-from nvflare.app_common.xgb.mock.mock_secure_client_runner import MockSecureClientRunner
+from nvflare.app_common.xgb.mock.mock_executor import MockXGBExecutor
+from nvflare.app_common.xgb.mock.mock_secure_client_applet import MockSecureClientApplet
 
 
-class MockSecureXGBExecutor(XGBExecutor):
+class MockSecureXGBExecutor(MockXGBExecutor):
     def __init__(
         self,
-        int_server_grpc_options=None,
-        req_timeout=10.0,
+        per_msg_timeout=2.0,
+        tx_timeout=10.0,
         in_process=True,
     ):
-        XGBExecutor.__init__(
+        MockXGBExecutor.__init__(
             self,
-            adaptor_component_id="",
-            req_timeout=req_timeout,
+            per_msg_timeout=per_msg_timeout,
+            tx_timeout=tx_timeout,
+            in_process=in_process,
         )
-        self.int_server_grpc_options = int_server_grpc_options
-        self.in_process = in_process
 
-    def get_adaptor(self, fl_ctx: FLContext):
-        runner = MockSecureClientRunner()
-        runner.initialize(fl_ctx)
-        adaptor = GrpcClientAdaptor(
-            int_server_grpc_options=self.int_server_grpc_options,
-            in_process=self.in_process,
-        )
-        adaptor.set_runner(runner)
-        return adaptor
+    def get_applet(self, fl_ctx: FLContext):
+        return MockSecureClientApplet()

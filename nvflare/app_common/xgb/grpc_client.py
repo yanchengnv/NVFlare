@@ -62,6 +62,7 @@ class GrpcClient:
             grpc.channel_ready_future(self.channel).result(timeout=ready_timeout)
         except grpc.FutureTimeoutError:
             raise RuntimeError(f"cannot connect to server after {ready_timeout} seconds")
+        self.logger.info("started local GRPC client (LGC)")
 
     def send_allgather(self, seq_num, rank, data: bytes):
         """Send Allgather request to gRPC server

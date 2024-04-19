@@ -14,19 +14,20 @@
 from nvflare.app_common.xgb.defs import Constant
 from nvflare.app_common.xgb.grpc_server import GrpcServer
 from nvflare.app_common.xgb.mock.aggr_servicer import AggrServicer
-from nvflare.app_common.xgb.runners.xgb_runner import AppRunner
+from nvflare.app_common.tie.applet import Applet
 
 
-class MockServerRunner(AppRunner):
+class MockServerApplet(Applet):
     def __init__(self, server_max_workers=10, aggr_timeout=10.0):
+        Applet.__init__(self)
         self.server_max_workers = server_max_workers
         self.aggr_timeout = aggr_timeout
         self._stopped = False
         self._server = None
 
-    def run(self, ctx: dict):
-        world_size = ctx.get(Constant.RUNNER_CTX_WORLD_SIZE)
-        addr = ctx.get(Constant.RUNNER_CTX_SERVER_ADDR)
+    def start(self, ctx: dict):
+        world_size = ctx.get(Constant.APP_CTX_WORLD_SIZE)
+        addr = ctx.get(Constant.APP_CTX_SERVER_ADDR)
 
         self._server = GrpcServer(
             addr,

@@ -13,13 +13,14 @@
 # limitations under the License.
 
 from nvflare.fuel.f3.drivers.net_utils import MAX_FRAME_SIZE
+from nvflare.app_common.tie.defs import Constant as TieConstant
 
 
 class Constant:
 
     # task name defaults
-    CONFIG_TASK_NAME = "config"
-    START_TASK_NAME = "start"
+    CONFIG_TASK_NAME = TieConstant.CONFIG_TASK_NAME
+    START_TASK_NAME = TieConstant.START_TASK_NAME
 
     # keys of adaptor config parameters
     CONF_KEY_CLIENT_RANKS = "client_ranks"
@@ -28,26 +29,17 @@ class Constant:
     CONF_KEY_NUM_ROUNDS = "num_rounds"
 
     # default component config values
-    CONFIG_TASK_TIMEOUT = 10
-    START_TASK_TIMEOUT = 10
+    CONFIG_TASK_TIMEOUT = TieConstant.CONFIG_TASK_TIMEOUT
+    START_TASK_TIMEOUT = TieConstant.START_TASK_TIMEOUT
     XGB_SERVER_READY_TIMEOUT = 10.0
 
-    TASK_CHECK_INTERVAL = 0.5
-    JOB_STATUS_CHECK_INTERVAL = 2.0
-    MAX_CLIENT_OP_INTERVAL = 90.0
-    WORKFLOW_PROGRESS_TIMEOUT = 3600.0
-
-    # message topics
-    TOPIC_XGB_REQUEST = "xgb.request"
-    TOPIC_XGB_REQUEST_CHECK = "xgb.req_check"
-    TOPIC_CLIENT_DONE = "xgb.client_done"
+    JOB_STATUS_CHECK_INTERVAL = TieConstant.JOB_STATUS_CHECK_INTERVAL
+    MAX_CLIENT_OP_INTERVAL = TieConstant.MAX_CLIENT_OP_INTERVAL
+    WORKFLOW_PROGRESS_TIMEOUT = TieConstant.WORKFLOW_PROGRESS_TIMEOUT
 
     # keys for Shareable between client and server
-    MSG_KEY_EXIT_CODE = "exit_code"
-    MSG_KEY_XGB_OP = "xgb.op"
-    MSG_KEY_XGB_REQ_ID = "xgb.req_id"
-    MSG_KEY_XGB_REQ_TRY_NUM = "xgb.req_try_num"
-    MSG_KEY_XGB_REQ_RECEIVED = "xgb.req_received"
+    MSG_KEY_EXIT_CODE = TieConstant.MSG_KEY_EXIT_CODE
+    MSG_KEY_XGB_OP = TieConstant.MSG_KEY_OP
 
     # XGB operation names
     OP_ALL_GATHER = "all_gather"
@@ -84,20 +76,20 @@ class Constant:
     PARAM_KEY_REQUEST = "xgb.request"
     PARAM_KEY_EVENT = "xgb.event"
 
-    RUNNER_CTX_SERVER_ADDR = "server_addr"
-    RUNNER_CTX_PORT = "port"
-    RUNNER_CTX_CLIENT_NAME = "client_name"
-    RUNNER_CTX_NUM_ROUNDS = "num_rounds"
-    RUNNER_CTX_WORLD_SIZE = "world_size"
-    RUNNER_CTX_RANK = "rank"
-    RUNNER_CTX_DATA_LOADER = "data_loader"
-    RUNNER_CTX_TB_DIR = "tb_dir"
-    RUNNER_CTX_MODEL_DIR = "model_dir"
+    APP_CTX_SERVER_ADDR = "server_addr"
+    APP_CTX_PORT = "port"
+    APP_CTX_CLIENT_NAME = "client_name"
+    APP_CTX_NUM_ROUNDS = "num_rounds"
+    APP_CTX_WORLD_SIZE = "world_size"
+    APP_CTX_RANK = "rank"
+    APP_CTX_TB_DIR = "tb_dir"
+    APP_CTX_MODEL_DIR = "model_dir"
 
     EVENT_BEFORE_BROADCAST = "xgb.before_broadcast"
     EVENT_AFTER_BROADCAST = "xgb.after_broadcast"
     EVENT_BEFORE_ALL_GATHER_V = "xgb.before_all_gather_v"
     EVENT_AFTER_ALL_GATHER_V = "xgb.after_all_gather_v"
+    EVENT_REQ_FAILED = "xgb.req_failed"
 
     HEADER_KEY_ENCRYPTED_DATA = "xgb.encrypted_data"
     HEADER_KEY_ORIGINAL_BUF_SIZE = "xgb.original_buf_size"

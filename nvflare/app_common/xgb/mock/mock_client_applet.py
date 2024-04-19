@@ -18,20 +18,20 @@ import nvflare.app_common.xgb.proto.federated_pb2 as pb2
 from nvflare.apis.fl_component import FLComponent
 from nvflare.app_common.xgb.defs import Constant
 from nvflare.app_common.xgb.grpc_client import GrpcClient
-from nvflare.app_common.xgb.runners.xgb_runner import AppRunner
+from nvflare.app_common.tie.applet import Applet
 
 
-class MockClientRunner(AppRunner, FLComponent):
+class MockClientApplet(Applet):
     def __init__(self):
-        FLComponent.__init__(self)
+        Applet.__init__(self)
         self.training_stopped = False
         self.asked_to_stop = False
 
-    def run(self, ctx: dict):
+    def start(self, ctx: dict):
         # raise RuntimeError("ABORTED")
-        server_addr = ctx.get(Constant.RUNNER_CTX_SERVER_ADDR)
-        rank = ctx.get(Constant.RUNNER_CTX_RANK)
-        num_rounds = ctx.get(Constant.RUNNER_CTX_NUM_ROUNDS)
+        server_addr = ctx.get(Constant.APP_CTX_SERVER_ADDR)
+        rank = ctx.get(Constant.APP_CTX_RANK)
+        num_rounds = ctx.get(Constant.APP_CTX_NUM_ROUNDS)
 
         client = GrpcClient(server_addr=server_addr)
         client.start()

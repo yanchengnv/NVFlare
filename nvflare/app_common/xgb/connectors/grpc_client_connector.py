@@ -14,7 +14,7 @@
 import nvflare.app_common.xgb.proto.federated_pb2 as pb2
 from nvflare.apis.fl_constant import FLContextKey
 from nvflare.apis.fl_context import FLContext
-from nvflare.app_common.xgb.adaptors.xgb_adaptor import XGBClientAdaptor
+from nvflare.app_common.xgb.connectors.xgb_connector import XGBClientConnector
 from nvflare.app_common.xgb.defs import Constant
 from nvflare.app_common.xgb.grpc_server import GrpcServer
 from nvflare.app_common.xgb.proto.federated_pb2_grpc import FederatedServicer
@@ -22,13 +22,15 @@ from nvflare.fuel.f3.drivers.net_utils import get_open_tcp_port
 from nvflare.security.logging import secure_format_exception
 
 
-class GrpcClientAdaptor(XGBClientAdaptor, FederatedServicer):
+class GrpcClientConnector(XGBClientConnector, FederatedServicer):
     def __init__(
         self,
         int_server_grpc_options=None,
         in_process=True,
+        per_msg_timeout=2.0,
+        tx_timeout=10.0,
     ):
-        XGBClientAdaptor.__init__(self, in_process)
+        XGBClientConnector.__init__(self, in_process, per_msg_timeout, tx_timeout)
         self.int_server_grpc_options = int_server_grpc_options
         self.in_process = in_process
         self.internal_xgb_server = None
@@ -41,14 +43,13 @@ class GrpcClientAdaptor(XGBClientAdaptor, FederatedServicer):
         self._run_dir = None
 
     def initialize(self, fl_ctx: FLContext):
+        super().initialize(fl_ctx)
         self._client_name = fl_ctx.get_identity_name()
-        engine = fl_ctx.get_engine()
-        ws = engine.get_workspace()
+        ws = self.engine.get_workspace()
         self._app_dir = ws.get_app_dir(fl_ctx.get_job_id())
         self._workspace = fl_ctx.get_prop(FLContextKey.WORKSPACE_OBJECT)
         run_number = fl_ctx.get_prop(FLContextKey.CURRENT_RUN)
         self._run_dir = self._workspace.get_run_dir(run_number)
-        self.engine = engine
 
     def _start_client(self, server_addr: str, fl_ctx: FLContext):
         """Start the XGB client runner in a separate thread or separate process based on config.
@@ -62,25 +63,25 @@ class GrpcClientAdaptor(XGBClientAdaptor, FederatedServicer):
         Returns: None
 
         """
-        runner_ctx = {
-            Constant.RUNNER_CTX_WORLD_SIZE: self.world_size,
-            Constant.RUNNER_CTX_CLIENT_NAME: self._client_name,
-            Constant.RUNNER_CTX_SERVER_ADDR: server_addr,
-            Constant.RUNNER_CTX_RANK: self.rank,
-            Constant.RUNNER_CTX_NUM_ROUNDS: self.num_rounds,
-            Constant.RUNNER_CTX_MODEL_DIR: self._run_dir,
-            Constant.RUNNER_CTX_TB_DIR: self._app_dir,
+        app_ctx = {
+            Constant.APP_CTX_WORLD_SIZE: self.world_size,
+            Constant.APP_CTX_CLIENT_NAME: self._client_name,
+            Constant.APP_CTX_SERVER_ADDR: server_addr,
+            Constant.APP_CTX_RANK: self.rank,
+            Constant.APP_CTX_NUM_ROUNDS: self.num_rounds,
+            Constant.APP_CTX_MODEL_DIR: self._run_dir,
+            Constant.APP_CTX_TB_DIR: self._app_dir,
         }
-        self.start_runner(runner_ctx, fl_ctx)
+        self.start_applet(app_ctx, fl_ctx)
 
     def _stop_client(self):
         self._training_stopped = True
-        self.stop_runner()
+        self.stop_applet()
 
     def _is_stopped(self) -> (bool, int):
-        runner_stopped, ec = self.is_runner_stopped()
-        if runner_stopped:
-            return runner_stopped, ec
+        applet_stopped, ec = self.is_applet_stopped()
+        if applet_stopped:
+            return applet_stopped, ec
 
         if self._training_stopped:
             return True, 0

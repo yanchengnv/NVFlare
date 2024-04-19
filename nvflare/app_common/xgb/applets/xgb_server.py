@@ -15,18 +15,18 @@
 import xgboost.federated as xgb_federated
 
 from nvflare.app_common.xgb.defs import Constant
-from nvflare.app_common.xgb.runners.xgb_runner import AppRunner
+from nvflare.app_common.tie.applet import Applet
 
 
-class XGBServerRunner(AppRunner):
+class XGBServerApplet(Applet):
     def __init__(self):
         self._port = None
         self._world_size = None
         self._stopped = False
 
-    def run(self, ctx: dict):
-        self._port = ctx.get(Constant.RUNNER_CTX_PORT)
-        self._world_size = ctx.get(Constant.RUNNER_CTX_WORLD_SIZE)
+    def start(self, ctx: dict):
+        self._port = ctx.get(Constant.APP_CTX_PORT)
+        self._world_size = ctx.get(Constant.APP_CTX_WORLD_SIZE)
 
         xgb_federated.run_federated_server(
             port=self._port,

@@ -13,20 +13,20 @@
 # limitations under the License.
 import nvflare.app_common.xgb.proto.federated_pb2 as pb2
 from nvflare.apis.fl_context import FLContext
-from nvflare.app_common.xgb.adaptors.xgb_adaptor import XGBServerAdaptor
+from nvflare.app_common.xgb.connectors.xgb_connector import XGBServerConnector
 from nvflare.app_common.xgb.defs import Constant
 from nvflare.app_common.xgb.grpc_client import GrpcClient
 from nvflare.fuel.f3.drivers.net_utils import get_open_tcp_port
 
 
-class GrpcServerAdaptor(XGBServerAdaptor):
+class GrpcServerConnector(XGBServerConnector):
     def __init__(
         self,
         int_client_grpc_options=None,
         xgb_server_ready_timeout=Constant.XGB_SERVER_READY_TIMEOUT,
         in_process=True,
     ):
-        XGBServerAdaptor.__init__(self, in_process)
+        XGBServerConnector.__init__(self, in_process)
         self.int_client_grpc_options = int_client_grpc_options
         self.xgb_server_ready_timeout = xgb_server_ready_timeout
         self.in_process = in_process
@@ -35,24 +35,25 @@ class GrpcServerAdaptor(XGBServerAdaptor):
         self._exit_code = 0
 
     def _start_server(self, addr: str, port: int, world_size: int, fl_ctx: FLContext):
-        runner_ctx = {
-            Constant.RUNNER_CTX_SERVER_ADDR: addr,
-            Constant.RUNNER_CTX_WORLD_SIZE: world_size,
-            Constant.RUNNER_CTX_PORT: port,
+        app_ctx = {
+            Constant.APP_CTX_SERVER_ADDR: addr,
+            Constant.APP_CTX_WORLD_SIZE: world_size,
+            Constant.APP_CTX_PORT: port,
         }
-
-        self.start_runner(runner_ctx, fl_ctx)
+        self.start_applet(app_ctx, fl_ctx)
 
     def _stop_server(self):
         self._server_stopped = True
-        self.stop_runner()
+        self.stop_applet()
 
     def _is_stopped(self) -> (bool, int):
-        runner_stopped, ec = self.is_runner_stopped()
+        runner_stopped, ec = self.is_applet_stopped()
         if runner_stopped:
+            self.logger.info("applet is stopped!")
             return runner_stopped, ec
 
         if self._server_stopped:
+            self.logger.info("grpc server is stopped!")
             return True, self._exit_code
 
         return False, 0
@@ -64,6 +65,7 @@ class GrpcServerAdaptor(XGBServerAdaptor):
             raise RuntimeError("failed to get a port for XGB server")
 
         server_addr = f"127.0.0.1:{port}"
+        self.log_info(fl_ctx, f"starting grpc connector: {server_addr=} {port=} {self.world_size=}")
         self._start_server(server_addr, port, self.world_size, fl_ctx)
 
         # start XGB client

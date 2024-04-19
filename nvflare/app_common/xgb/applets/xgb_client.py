@@ -20,14 +20,15 @@ from nvflare.apis.fl_component import FLComponent
 from nvflare.apis.fl_context import FLContext
 from nvflare.app_common.xgb.data_loader import XGBDataLoader
 from nvflare.app_common.xgb.defs import Constant
-from nvflare.app_common.xgb.runners.xgb_runner import AppRunner
+from nvflare.app_common.tie.applet import Applet
 from nvflare.app_common.xgb.tb import TensorBoardCallback
 from nvflare.app_common.xgb.xgb_params import XGBoostParams
 from nvflare.fuel.utils.import_utils import optional_import
 from nvflare.fuel.utils.obj_utils import get_logger
+from nvflare.app_common.tracking.log_writer import LogWriter
 
 
-class XGBClientRunner(AppRunner, FLComponent):
+class XGBClientApplet(Applet, FLComponent):
     def __init__(
         self,
         data_loader_id: str,
@@ -36,7 +37,23 @@ class XGBClientRunner(AppRunner, FLComponent):
         verbose_eval,
         use_gpus,
         model_file_name,
+        metrics_writer_id: str = None,
     ):
+        """Constructor.
+
+        Args:
+            early_stopping_rounds: early stopping rounds
+            xgb_params: This dict is passed to `xgboost.train()` as the first argument `params`.
+                It contains all the Booster parameters.
+                Please refer to XGBoost documentation for details:
+                https://xgboost.readthedocs.io/en/stable/parameter.html
+            data_loader_id: the ID points to XGBDataLoader.
+            verbose_eval: verbose_eval in xgboost.train
+            use_gpus (bool): A convenient flag to enable gpu training, if gpu device is specified in
+                the `xgb_params` then this flag can be ignored.
+            metrics_writer_id: the ID points to a LogWriter, if provided, a MetricsCallback will be added.
+                Users can then use the receivers from nvflare.app_opt.tracking.
+        """
         FLComponent.__init__(self)
         self.early_stopping_rounds = early_stopping_rounds
         self.xgb_params = xgb_params
@@ -55,12 +72,18 @@ class XGBClientRunner(AppRunner, FLComponent):
         self._tb_dir = None
         self._model_dir = None
         self._stopped = False
+        self._metrics_writer_id = metrics_writer_id
+        self._metrics_writer = None
 
     def initialize(self, fl_ctx: FLContext):
         engine = fl_ctx.get_engine()
         self._data_loader = engine.get_component(self.data_loader_id)
         if not isinstance(self._data_loader, XGBDataLoader):
             self.system_panic(f"data_loader should be type XGBDataLoader but got {type(self._data_loader)}", fl_ctx)
+        if self._metrics_writer_id:
+            self._metrics_writer = engine.get_component(self._metrics_writer_id)
+            if not isinstance(self._metrics_writer, LogWriter):
+                self.system_panic("writer should be type LogWriter", fl_ctx)
 
     def _xgb_train(self, params: XGBoostParams, train_data, val_data) -> xgb.core.Booster:
         """XGBoost training logic.
@@ -75,6 +98,9 @@ class XGBClientRunner(AppRunner, FLComponent):
         watchlist = [(val_data, "eval"), (train_data, "train")]
 
         callbacks = [callback.EvaluationMonitor(rank=self._rank)]
+        # if self._metrics_writer:
+        #     callbacks.append(MetricsCallback(self._metrics_writer))
+
         tensorboard, flag = optional_import(module="torch.utils.tensorboard")
         if flag and self._tb_dir:
             callbacks.append(TensorBoardCallback(self._tb_dir, tensorboard))
@@ -91,15 +117,14 @@ class XGBClientRunner(AppRunner, FLComponent):
         )
         return bst
 
-    def run(self, ctx: dict):
-        self._client_name = ctx.get(Constant.RUNNER_CTX_CLIENT_NAME)
-        self._rank = ctx.get(Constant.RUNNER_CTX_RANK)
-        self._world_size = ctx.get(Constant.RUNNER_CTX_WORLD_SIZE)
-        self._num_rounds = ctx.get(Constant.RUNNER_CTX_NUM_ROUNDS)
-        self._server_addr = ctx.get(Constant.RUNNER_CTX_SERVER_ADDR)
-        self._data_loader = ctx.get(Constant.RUNNER_CTX_DATA_LOADER)
-        self._tb_dir = ctx.get(Constant.RUNNER_CTX_TB_DIR)
-        self._model_dir = ctx.get(Constant.RUNNER_CTX_MODEL_DIR)
+    def start(self, ctx: dict):
+        self._client_name = ctx.get(Constant.APP_CTX_CLIENT_NAME)
+        self._rank = ctx.get(Constant.APP_CTX_RANK)
+        self._world_size = ctx.get(Constant.APP_CTX_WORLD_SIZE)
+        self._num_rounds = ctx.get(Constant.APP_CTX_NUM_ROUNDS)
+        self._server_addr = ctx.get(Constant.APP_CTX_SERVER_ADDR)
+        self._tb_dir = ctx.get(Constant.APP_CTX_TB_DIR)
+        self._model_dir = ctx.get(Constant.APP_CTX_MODEL_DIR)
 
         if self.use_gpus:
             # mapping each rank to a GPU (can set to cuda:0 if simulating with only one gpu)
@@ -134,7 +159,7 @@ class XGBClientRunner(AppRunner, FLComponent):
         self._stopped = True
 
     def stop(self):
-        # currently no way to stop the runner
+        # currently no way to stop the APPLET
         pass
 
     def is_stopped(self) -> (bool, int):

@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Dict, Optional
+from typing import Optional
 
 from nvflare.app_common.app_constant import AppConstants
 from nvflare.app_common.executors.in_process_client_api_executor import InProcessClientAPIExecutor
@@ -26,7 +26,6 @@ class PTInProcessClientAPIExecutor(InProcessClientAPIExecutor):
         self,
         task_script_path: str,
         task_script_args: str = "",
-        task_fn_args: Dict = None,
         task_wait_time: Optional[float] = None,
         result_pull_interval: float = 0.5,
         log_pull_interval: Optional[float] = None,
@@ -37,11 +36,11 @@ class PTInProcessClientAPIExecutor(InProcessClientAPIExecutor):
         train_task_name: str = "train",
         evaluate_task_name: str = "evaluate",
         submit_model_task_name: str = "submit_model",
+        params_exchange_format=ExchangeFormat.PYTORCH,
     ):
         super(PTInProcessClientAPIExecutor, self).__init__(
             task_script_path=task_script_path,
             task_script_args=task_script_args,
-            task_fn_args=task_fn_args,
             task_wait_time=task_wait_time,
             result_pull_interval=result_pull_interval,
             train_with_evaluation=train_with_evaluation,
@@ -50,7 +49,7 @@ class PTInProcessClientAPIExecutor(InProcessClientAPIExecutor):
             submit_model_task_name=submit_model_task_name,
             from_nvflare_converter_id=from_nvflare_converter_id,
             to_nvflare_converter_id=to_nvflare_converter_id,
-            params_exchange_format=ExchangeFormat.PYTORCH,
+            params_exchange_format=params_exchange_format,
             params_transfer_type=params_transfer_type,
             log_pull_interval=log_pull_interval,
         )

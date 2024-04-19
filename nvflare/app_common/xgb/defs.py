@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from nvflare.fuel.f3.drivers.net_utils import MAX_FRAME_SIZE
 from nvflare.app_common.tie.defs import Constant as TieConstant
+from nvflare.fuel.f3.drivers.net_utils import MAX_FRAME_SIZE
 
 
 class Constant:

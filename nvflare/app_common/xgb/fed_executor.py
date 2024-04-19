@@ -12,9 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from nvflare.apis.fl_context import FLContext
-from nvflare.app_common.xgb.connectors.grpc_client_connector import GrpcClientConnector
-from nvflare.app_common.xgb.applets.xgb_client import XGBClientApplet
 from nvflare.app_common.tie.executor import TieExecutor
+from nvflare.app_common.xgb.applets.xgb_client import XGBClientApplet
+from nvflare.app_common.xgb.connectors.grpc_client_connector import GrpcClientConnector
+
 from .defs import Constant
 
 

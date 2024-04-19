@@ -1,13 +1,11 @@
 from abc import abstractmethod
 
 from nvflare.apis.fl_context import FLContext
-from nvflare.apis.shareable import Shareable, make_reply, ReturnCode
+from nvflare.apis.shareable import ReturnCode, Shareable
 from nvflare.apis.signal import Signal
 from nvflare.app_common.tie.connector import Connector
 from nvflare.app_common.xgb.defs import Constant
 from nvflare.fuel.utils.validation_utils import check_non_negative_int, check_positive_int
-
-XGB_APP_NAME = "XGBoost"
 
 
 class XGBServerConnector(Connector):
@@ -16,7 +14,7 @@ class XGBServerConnector(Connector):
     """
 
     def __init__(self, in_process):
-        Connector.__init__(self, XGB_APP_NAME, in_process)
+        Connector.__init__(self, in_process)
         self.world_size = None
         # set up operation handlers
         self.op_table = {
@@ -248,7 +246,7 @@ class XGBClientConnector(Connector):
 
     def __init__(self, in_process, per_msg_timeout, tx_timeout):
         """Constructor of XGBClientAdaptor"""
-        Connector.__init__(self, XGB_APP_NAME, in_process)
+        Connector.__init__(self, in_process)
         self.per_msg_timeout = per_msg_timeout
         self.tx_timeout = tx_timeout
         self.stopped = False

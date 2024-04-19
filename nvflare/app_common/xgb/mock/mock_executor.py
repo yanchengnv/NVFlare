@@ -30,7 +30,7 @@ class MockXGBExecutor(FedXGBHistogramExecutor):
             data_loader_id="",
             in_process=in_process,
             per_msg_timeout=per_msg_timeout,
-            tx_timeout=tx_timeout
+            tx_timeout=tx_timeout,
         )
 
     def get_applet(self, fl_ctx: FLContext):

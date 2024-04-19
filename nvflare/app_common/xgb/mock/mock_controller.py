@@ -13,8 +13,8 @@
 # limitations under the License.
 
 from nvflare.apis.fl_context import FLContext
-from nvflare.app_common.xgb.fed_controller import XGBFedController
 from nvflare.app_common.xgb.defs import Constant
+from nvflare.app_common.xgb.fed_controller import XGBFedController
 from nvflare.app_common.xgb.mock.mock_server_applet import MockServerApplet
 
 

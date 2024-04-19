@@ -14,8 +14,8 @@
 
 import xgboost.federated as xgb_federated
 
-from nvflare.app_common.xgb.defs import Constant
 from nvflare.app_common.tie.applet import Applet
+from nvflare.app_common.xgb.defs import Constant
 
 
 class XGBServerApplet(Applet):

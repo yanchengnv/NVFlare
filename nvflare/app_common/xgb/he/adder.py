@@ -13,14 +13,17 @@
 # limitations under the License.
 
 import concurrent.futures
+import itertools
 
-from nvflare.app_common.xgb.aggr import Aggregator
+from nvflare.app_common.xgb.he.aggr import Aggregator
+from .cipher import Cipher
 
 from .util import encode_encrypted_numbers_to_str
 
 
 class Adder:
-    def __init__(self, max_workers=10):
+    def __init__(self, cipher: Cipher, max_workers=10):
+        self.cipher = cipher
         self.exe = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
 
     def add(self, encrypted_numbers, features, sample_groups=None, encode_sum=True):
@@ -50,17 +53,17 @@ class Adder:
                     gid, sample_id_list = g
                     items.append((encode_sum, fid, encrypted_numbers, mask, num_bins, gid, sample_id_list))
 
-        results = self.exe.map(_do_add, items)
+        results = self.exe.map(_do_add, items, itertools.repeat(self.cipher))
         rl = []
         for r in results:
             rl.append(r)
         return rl
 
 
-def _do_add(item):
+def _do_add(item, cipher):
     encode_sum, fid, encrypted_numbers, mask, num_bins, gid, sample_id_list = item
     # bins = [0 for _ in range(num_bins)]
-    aggr = Aggregator()
+    aggr = Aggregator(cipher)
 
     bins = aggr.aggregate(
         gh_values=encrypted_numbers,
@@ -68,24 +71,6 @@ def _do_add(item):
         num_bins=num_bins,
         sample_ids=sample_id_list,
     )
-    #
-    # if not sample_id_list:
-    #     # all samples
-    #     for sample_id in range(len(encrypted_numbers)):
-    #         bid = mask[sample_id]
-    #         if bins[bid] == 0:
-    #             # avoid plain_text + cypher_text, which could be slow!
-    #             bins[bid] = encrypted_numbers[sample_id]
-    #         else:
-    #             bins[bid] += encrypted_numbers[sample_id]
-    # else:
-    #     for sample_id in sample_id_list:
-    #         bid = mask[sample_id]
-    #         if bins[bid] == 0:
-    #             # avoid plain_text + cypher_text, which could be slow!
-    #             bins[bid] = encrypted_numbers[sample_id]
-    #         else:
-    #             bins[bid] += encrypted_numbers[sample_id]
 
     if encode_sum:
         sums = encode_encrypted_numbers_to_str(bins)

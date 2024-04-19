@@ -14,8 +14,6 @@
 
 import json
 
-import phe
-
 SCALE_FACTOR = 10000000000000
 
 

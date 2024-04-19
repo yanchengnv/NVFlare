@@ -17,7 +17,7 @@ import random
 from typing import Dict, List, Tuple
 
 from nvflare.apis.fl_context import FLContext
-from nvflare.app_common.xgb.aggr import Aggregator
+from nvflare.app_common.xgb.he.aggr import Aggregator
 from nvflare.app_common.xgb.defs import Constant
 from nvflare.app_common.xgb.sec.data_converter import (
     AggregationContext,

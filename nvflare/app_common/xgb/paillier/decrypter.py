@@ -43,7 +43,10 @@ class Decrypter:
                 )
             )
 
-        results = self.exe.map(_do_decrypt, items)
+        chunk_size = int(len(items)/self.max_workers)
+        if chunk_size == 0:
+            chunk_size = 1
+        results = self.exe.map(_do_decrypt, items, chunksize=chunk_size)
         rl = []
         for r in results:
             rl.append(r)

@@ -90,3 +90,12 @@ def decode_feature_aggregations(pubkey, encoded: str):
         encrypted_numbers = decode_encrypted_numbers_from_str(pubkey, encoded_nums_str)
         result.append((feature_id, gid, encrypted_numbers))
     return result
+
+
+def compute_chunk_size(num_items: int, num_workers: int) -> int:
+    n = int(num_items/num_workers)
+    r = num_items % num_workers
+
+    # we make sure that the total number of chunks will be <= num_workers.
+    # if there is remainder (r > 0), then we make the chunk size n+1; otherwise there will be num_workers+1 chunks
+    return n if r == 0 else n+1

@@ -13,11 +13,10 @@
 # limitations under the License.
 
 import concurrent.futures
-import time
 
 from nvflare.app_common.xgb.aggr import Aggregator
 
-from .util import encode_encrypted_numbers_to_str, compute_chunk_size
+from .util import encode_encrypted_numbers_to_str
 
 
 class Adder:
@@ -41,29 +40,52 @@ class Adder:
             samples in the group for the feature.
 
         """
-        t = time.time()
         items = []
+        for _ in range(self.num_workers):
+            items.append(encrypted_numbers)
+        self.exe.map(_do_set_nums, items)
+
+        items = []
+
         for f in features:
             fid, mask, num_bins = f
             if not sample_groups:
-                items.append((encode_sum, fid, encrypted_numbers, mask, num_bins, 0, None))
+                items.append((encode_sum, fid, mask, num_bins, 0, None))
             else:
                 for g in sample_groups:
                     gid, sample_id_list = g
-                    items.append((encode_sum, fid, encrypted_numbers, mask, num_bins, gid, sample_id_list))
+                    items.append((encode_sum, fid, mask, num_bins, gid, sample_id_list))
 
-        chunk_size = compute_chunk_size(len(items), self.num_workers)
-        print(f"task chunk size: {chunk_size}")
-        print(f"add prep took {time.time()-t} secs")
-        results = self.exe.map(_do_add, items, chunksize=chunk_size)
+        results = self.exe.map(_do_add, items)
         rl = []
         for r in results:
             rl.append(r)
         return rl
 
 
+__encrypted_numbers = None
+
+
+def _do_set_nums(item):
+    global __encrypted_numbers
+    __encrypted_numbers = item
+    print("_do_set_nums: got encrypted_numbers")
+    return True
+
+
 def _do_add(item):
-    encode_sum, fid, encrypted_numbers, mask, num_bins, gid, sample_id_list = item
+    global __encrypted_numbers
+
+    encode_sum, fid, mask, num_bins, gid, sample_id_list = item
+
+    if not __encrypted_numbers:
+        print("NO __encrypted_numbers")
+        return fid, gid, None
+
+    print("_do_add: got encrypted_numbers")
+
+    encrypted_numbers = __encrypted_numbers
+
     # bins = [0 for _ in range(num_bins)]
     aggr = Aggregator()
 

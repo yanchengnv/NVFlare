@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import concurrent.futures
+from .util import compute_chunk_size
 
 
 class Encryptor:
@@ -31,11 +32,8 @@ class Encryptor:
 
         """
         items = [(self.pubkey, numbers[i]) for i in range(len(numbers))]
-        chunk_size = int(len(items) / self.max_workers)
-        if chunk_size == 0:
-            chunk_size = 1
-
-        print(f"num_items: {len(items)}, {chunk_size=}")
+        chunk_size = compute_chunk_size(len(items), self.max_workers)
+        print(f"encrypt: num_items: {len(items)}, {chunk_size=}")
         results = self.exe.map(_do_enc, items, chunksize=chunk_size)
         rl = []
         for r in results:

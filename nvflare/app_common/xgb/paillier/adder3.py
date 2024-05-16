@@ -13,11 +13,10 @@
 # limitations under the License.
 
 import concurrent.futures
-import time
 
 from nvflare.app_common.xgb.aggr import Aggregator
 
-from .util import encode_encrypted_numbers_to_str, compute_chunk_size
+from .util import encode_encrypted_numbers_to_str
 
 
 class Adder:
@@ -41,59 +40,79 @@ class Adder:
             samples in the group for the feature.
 
         """
-        t = time.time()
+        feature_table = {}
+        g_table = {}
         items = []
+
         for f in features:
             fid, mask, num_bins = f
+            feature_table[fid] = (mask, num_bins)
             if not sample_groups:
-                items.append((encode_sum, fid, encrypted_numbers, mask, num_bins, 0, None))
+                items.append((fid, 0))
             else:
                 for g in sample_groups:
                     gid, sample_id_list = g
-                    items.append((encode_sum, fid, encrypted_numbers, mask, num_bins, gid, sample_id_list))
+                    g_table[gid] = sample_id_list
+                    items.append((fid, gid))
 
-        chunk_size = compute_chunk_size(len(items), self.num_workers)
-        print(f"task chunk size: {chunk_size}")
-        print(f"add prep took {time.time()-t} secs")
-        results = self.exe.map(_do_add, items, chunksize=chunk_size)
+        # chunk items into worker_items
+        num_items_per_worker = int(len(items) / self.num_workers)
+        remaining = len(items) % self.num_workers
+
+        worker_items = []
+        start_idx = 0
+        for i in range(self.num_workers):
+            # determine number of items to be assigned to worker i
+            n = num_items_per_worker
+            if i < remaining:
+                n += 1
+            if n == 0:
+                # this only happens when the number of items < number of workers
+                break
+
+            wi = items[start_idx:start_idx+n]
+            start_idx += n
+            ft = {}
+            gt = {}
+
+            # determine content of the feature table (ft) and gid table (gt) to be used for this worker
+            for it in wi:
+                fid, gid = it
+                ft[fid] = feature_table[fid]
+                if gid > 0:
+                    gt[gid] = g_table[gid]
+            worker_items.append((encode_sum, ft, gt, encrypted_numbers, wi))
+
+        print(f"num items: {len(items)}")
+        print(f"num worker items: {len(worker_items)}")
+        results = self.exe.map(_do_add, worker_items)
         rl = []
         for r in results:
-            rl.append(r)
+            rl.extend(r)
         return rl
 
 
 def _do_add(item):
-    encode_sum, fid, encrypted_numbers, mask, num_bins, gid, sample_id_list = item
-    # bins = [0 for _ in range(num_bins)]
-    aggr = Aggregator()
+    encode_sum, feature_table, g_table, encrypted_numbers, wi = item
+    result = []
 
-    bins = aggr.aggregate(
-        gh_values=encrypted_numbers,
-        sample_bin_assignment=mask,
-        num_bins=num_bins,
-        sample_ids=sample_id_list,
-    )
-    #
-    # if not sample_id_list:
-    #     # all samples
-    #     for sample_id in range(len(encrypted_numbers)):
-    #         bid = mask[sample_id]
-    #         if bins[bid] == 0:
-    #             # avoid plain_text + cypher_text, which could be slow!
-    #             bins[bid] = encrypted_numbers[sample_id]
-    #         else:
-    #             bins[bid] += encrypted_numbers[sample_id]
-    # else:
-    #     for sample_id in sample_id_list:
-    #         bid = mask[sample_id]
-    #         if bins[bid] == 0:
-    #             # avoid plain_text + cypher_text, which could be slow!
-    #             bins[bid] = encrypted_numbers[sample_id]
-    #         else:
-    #             bins[bid] += encrypted_numbers[sample_id]
+    for it in wi:
+        fid, gid = it
+        aggr = Aggregator()
+        mask, num_bins = feature_table[fid]
+        sample_id_list = g_table.get(gid, None)
+        bins = aggr.aggregate(
+            gh_values=encrypted_numbers,
+            sample_bin_assignment=mask,
+            num_bins=num_bins,
+            sample_ids=sample_id_list,
+        )
 
-    if encode_sum:
-        sums = encode_encrypted_numbers_to_str(bins)
-    else:
-        sums = bins
-    return fid, gid, sums
+        if encode_sum:
+            sums = encode_encrypted_numbers_to_str(bins)
+        else:
+            sums = bins
+
+        result.append((fid, gid, sums))
+
+    return result

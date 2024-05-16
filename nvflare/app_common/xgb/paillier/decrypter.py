@@ -13,7 +13,8 @@
 # limitations under the License.
 
 import concurrent.futures
-import time
+
+from .util import compute_chunk_size
 
 
 class Decrypter:
@@ -43,9 +44,7 @@ class Decrypter:
                 )
             )
 
-        chunk_size = int(len(items)/self.max_workers)
-        if chunk_size == 0:
-            chunk_size = 1
+        chunk_size = compute_chunk_size(len(items), self.max_workers)
         results = self.exe.map(_do_decrypt, items, chunksize=chunk_size)
         rl = []
         for r in results:

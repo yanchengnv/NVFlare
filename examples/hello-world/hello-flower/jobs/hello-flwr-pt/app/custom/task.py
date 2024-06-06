@@ -50,7 +50,6 @@ def train(net, trainloader, valloader, epochs, device):
     optimizer = torch.optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
     net.train()
     for _ in range(epochs):
-        print(f"############### Training epoch {_+1} of {epochs}")
         for images, labels in trainloader:
             images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
@@ -67,7 +66,6 @@ def train(net, trainloader, valloader, epochs, device):
         "val_loss": val_loss,
         "val_accuracy": val_acc,
     }
-    print("results", results)
     return results
 
 

@@ -11,8 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import os.path
-
 from nvflare.apis.fl_context import FLContext
 from nvflare.app_common.tie.controller import TieController
 from nvflare.app_common.tie.defs import Constant as TieConstant

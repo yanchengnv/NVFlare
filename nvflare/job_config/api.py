@@ -469,8 +469,8 @@ class FedJob:
             app_name = "app_server"
         else:
             raise ValueError(
-                f"App needs to be of type `ClientAppConfig` or `ServerAppConfig` "
-                "but was type {type(client_server_config)}"
+                "App needs to be of type `ClientAppConfig` or `ServerAppConfig` "
+                f"but was type {type(client_server_config)}"
             )
 
         self.job.add_fed_app(app_name, app_config)

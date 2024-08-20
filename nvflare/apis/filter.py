@@ -17,7 +17,6 @@ from abc import ABC, abstractmethod
 from nvflare.apis.fl_component import FLComponent
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import Shareable
-from nvflare.job_config.defs import FilterType
 
 
 class ContentBlockedException(Exception):

@@ -62,7 +62,7 @@ class CertBuilder(Builder):
             self.persistent_state["root_cert"] = self.serialized_cert.decode("ascii")
             self.persistent_state["root_pri_key"] = serialize_pri_key(self.pri_key).decode("ascii")
 
-    def _build_write_cert_pair(self, participant, base_name, ctx):
+    def _build_write_cert_pair(self, participant, ctx):
         subject = self.get_subject(participant)
         if self.persistent_state and subject in self.persistent_state:
             cert = x509.load_pem_x509_certificate(
@@ -88,11 +88,20 @@ class CertBuilder(Builder):
                 cert=serialize_cert(cert).decode("ascii"), pri_key=serialize_pri_key(pri_key).decode("ascii")
             )
         dest_dir = self.get_kit_dir(participant, ctx)
+
+        # build required basic cert
+        if participant.type == "server":
+            base_name = "server"
+        else:
+            base_name = "client"
+
         with open(os.path.join(dest_dir, f"{base_name}.crt"), "wb") as f:
             f.write(serialize_cert(cert))
         with open(os.path.join(dest_dir, f"{base_name}.key"), "wb") as f:
             f.write(serialize_pri_key(pri_key))
-        if base_name == "client" and (listening_host := participant.get_listening_host()):
+
+        if participant.type in ["client", "relay"] and (listening_host := participant.get_listening_host()):
+            # create server cert
             tmp_participant = Participant(
                 type="server",
                 name=participant.name,

@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Union
 
 import grpc
 
+from nvflare.fuel.data_event.data_bus import DataBus
 from nvflare.fuel.f3.comm_config import CommConfigurator
 from nvflare.fuel.f3.comm_error import CommError
 from nvflare.fuel.f3.connection import Connection
@@ -245,8 +246,15 @@ class GrpcDriver(BaseDriver):
             secure = ssl_required(params)
             if secure:
                 self.logger.debug("CLIENT: creating secure channel")
+                creds = get_grpc_client_credentials(params)
+                data_bus = DataBus()
+                creds_list = []
+                data_bus.publish(topics=["auth"], datum=creds_list)
+                if creds_list:
+                    creds = grpc.composite_channel_credentials(creds, *creds_list)
+
                 channel = grpc.secure_channel(
-                    address, options=self.options, credentials=get_grpc_client_credentials(params)
+                    address, options=self.options, credentials=creds
                 )
                 self.logger.info(f"created secure channel at {address}")
             else:

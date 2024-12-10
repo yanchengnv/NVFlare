@@ -327,7 +327,7 @@ class ReliableMessenger(FLComponent):
             handler_info = self.registry.find(rm_channel, rm_topic)
             if not handler_info:
                 # no handler registered for this topic!
-                self.error(fl_ctx, f"no handler registered for request")
+                self.error(fl_ctx, "no handler registered for request")
                 return make_reply(ReturnCode.TOPIC_UNKNOWN)
 
             # check whether the request is still standing or completed
@@ -430,35 +430,17 @@ class ReliableMessenger(FLComponent):
             self.logger.info("ReliableMessage is shutdown")
 
     def _log_msg(self, fl_ctx: FLContext, msg: str, level):
-        props = []
-        tx_id = fl_ctx.get_prop(PROP_KEY_TX_ID)
-        if tx_id:
-            props.append(f"rm_tx={tx_id}")
-
-        op = fl_ctx.get_prop(PROP_KEY_OP)
-        if op:
-            props.append(f"rm_op={op}")
-
-        topic = fl_ctx.get_prop(PROP_KEY_TOPIC)
-        if topic:
-            props.append(f"rm_topic={topic}")
-
-        channel = fl_ctx.get_prop(PROP_KEY_CHANNEL)
-        if channel:
-            props.append(f"rm_channel={channel}")
-
-        debug_info = fl_ctx.get_prop(PROP_KEY_DEBUG_INFO)
-        if debug_info:
-            for k, v in debug_info.items():
-                props.append(f"{k}={v}")
-
-        rm_ctx = ""
-        if props:
-            rm_ctx = " ".join(props)
-
-        if rm_ctx:
-            msg = f"[{rm_ctx}] {msg}"
-        msg = generate_log_message(fl_ctx, msg)
+        msg = generate_log_message(
+            fl_ctx,
+            msg,
+            ctx_keys={
+                PROP_KEY_TX_ID: "rm_tx",
+                PROP_KEY_OP: "rm_op",
+                PROP_KEY_TOPIC: "rm_topic",
+                PROP_KEY_CHANNEL: "rm_channel",
+                PROP_KEY_DEBUG_INFO: "debug",
+            },
+        )
         self.logger.log(level, msg)
 
     def info(self, fl_ctx: FLContext, msg: str):

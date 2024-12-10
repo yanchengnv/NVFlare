@@ -49,7 +49,7 @@ def gen_new_peer_ctx(fl_ctx: FLContext, need_deep_copy=False):
     return new_peer_ctx
 
 
-def generate_log_message(fl_ctx: FLContext, msg: str):
+def generate_log_message(fl_ctx: FLContext, msg: str, ctx_keys=None):
     if not fl_ctx:
         return msg
 
@@ -104,9 +104,19 @@ def generate_log_message(fl_ctx: FLContext, msg: str):
     ctx_items = []
     for item in item_order:
         if item in all_kvs:
-            ctx_items.append(item + "=" + str(all_kvs[item]))
+            ctx_items.append(f"{item}={all_kvs[item]}")
 
-    return "[" + ", ".join(ctx_items) + "]: " + msg
+    basic_ctx = "[" + ", ".join(ctx_items) + "]"
+    extra_ctx = ""
+    if ctx_keys:
+        ctx_items = []
+        for prop_key, ck in ctx_keys:
+            v = fl_ctx.get_prop(prop_key)
+            if v:
+                ctx_items.append(f"{ck}={v}")
+        if ctx_items:
+            extra_ctx = "[" + ", ".join(ctx_items) + "]"
+    return f"{basic_ctx}{extra_ctx}: {msg}"
 
 
 def add_job_audit_event(fl_ctx: FLContext, ref: str = "", msg: str = "") -> str:

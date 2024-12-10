@@ -22,9 +22,9 @@ from nvflare.apis.controller_spec import ClientTask, Task
 from nvflare.apis.fl_constant import FLContextKey
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.impl.controller import Controller
+from nvflare.apis.rm import RMEngine
 from nvflare.apis.shareable import ReturnCode, Shareable, make_reply
 from nvflare.apis.signal import Signal
-from nvflare.apis.utils.reliable_message import ReliableMessage
 from nvflare.app_opt.xgboost.histogram_based_v2.adaptors.xgb_adaptor import XGBServerAdaptor
 from nvflare.fuel.utils.validation_utils import check_number_range, check_object_type, check_positive_number, check_str
 from nvflare.security.logging import secure_format_exception
@@ -179,12 +179,16 @@ class XGBController(Controller):
         adaptor.initialize(fl_ctx)
         self.adaptor = adaptor
 
-        ReliableMessage.register_request_handler(
+        engine = fl_ctx.get_engine()
+        assert isinstance(engine, RMEngine)
+        engine.register_reliable_request_handler(
+            channel=Constant.RM_CHANNEL,
             topic=Constant.TOPIC_XGB_REQUEST,
             handler_f=self._process_xgb_request,
             fl_ctx=fl_ctx,
         )
-        ReliableMessage.register_request_handler(
+        engine.register_reliable_request_handler(
+            channel=Constant.RM_CHANNEL,
             topic=Constant.TOPIC_CLIENT_DONE,
             handler_f=self._process_client_done,
             fl_ctx=fl_ctx,
@@ -245,7 +249,7 @@ class XGBController(Controller):
                 status.xgb_done = client_done
             status.last_op_time = time.time()
 
-    def _process_client_done(self, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
+    def _process_client_done(self, channel: str, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
         """Process the ClientDone report for a client
 
         Args:
@@ -256,6 +260,7 @@ class XGBController(Controller):
         Returns: reply to the client
 
         """
+        self.logger.debug(f"_process_client_done: {channel=} {topic=}")
         exit_code = request.get(Constant.MSG_KEY_EXIT_CODE)
 
         if exit_code == 0:
@@ -380,7 +385,8 @@ class XGBController(Controller):
         reply[Constant.PARAM_KEY_RCV_BUF] = rcv_buf
         return reply
 
-    def _process_xgb_request(self, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
+    def _process_xgb_request(self, channel: str, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
+        self.logger.debug(f"_process_xgb_request: {channel=} {topic=}")
         op = request.get_header(Constant.MSG_KEY_XGB_OP)
         if self._is_stopped():
             self.log_error(fl_ctx, f"dropped XGB request '{op}' since server is already stopped")

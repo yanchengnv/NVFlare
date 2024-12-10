@@ -17,8 +17,8 @@ from typing import Tuple
 
 from nvflare.apis.fl_constant import ReturnCode
 from nvflare.apis.fl_context import FLContext
+from nvflare.apis.rm import PROP_KEY_DEBUG_INFO, RMEngine
 from nvflare.apis.shareable import Shareable
-from nvflare.apis.utils.reliable_message import PROP_KEY_DEBUG_INFO, ReliableMessage
 from nvflare.app_opt.xgboost.histogram_based_v2.defs import Constant
 from nvflare.fuel.f3.cellnet.fqcn import FQCN
 from nvflare.fuel.utils.validation_utils import check_non_negative_int, check_positive_int
@@ -240,13 +240,15 @@ class XGBClientAdaptor(AppAdaptor, ABC):
                 "seq": req[Constant.PARAM_KEY_SEQ],
             }
             fl_ctx.set_prop(key=PROP_KEY_DEBUG_INFO, value=debug_info, private=True, sticky=False)
-            reply = ReliableMessage.send_request(
+
+            assert isinstance(self.engine, RMEngine)
+            reply = self.engine.send_reliable_request(
                 target=FQCN.ROOT_SERVER,
+                channel=Constant.RM_CHANNEL,
                 topic=Constant.TOPIC_XGB_REQUEST,
                 request=req,
                 per_msg_timeout=self.per_msg_timeout,
                 tx_timeout=self.tx_timeout,
-                abort_signal=self.abort_signal,
                 fl_ctx=fl_ctx,
             )
 

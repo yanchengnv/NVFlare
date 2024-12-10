@@ -24,6 +24,7 @@ from nvflare.apis.workspace import Workspace
 from nvflare.private.aux_runner import AuxRunner
 from nvflare.private.event import fire_event
 from nvflare.private.fed.utils.fed_utils import create_job_processing_context_properties
+from nvflare.private.rm_runner import ReliableMessenger
 from nvflare.private.stream_runner import ObjectStreamer
 
 from .client_manager import ClientManager
@@ -59,8 +60,10 @@ class RunManager(EngineSpec):
         self.handlers = handlers
         self.aux_runner = AuxRunner(self)
         self.object_streamer = ObjectStreamer(self.aux_runner)
+        self.reliable_messenger = ReliableMessenger(self.aux_runner)
         self.add_handler(self.aux_runner)
         self.add_handler(self.object_streamer)
+        self.add_handler(self.reliable_messenger)
 
         if job_id:
             job_ctx_props = self.create_job_processing_context_properties(workspace, job_id)

@@ -32,6 +32,7 @@ class ReservedHeaderKey(object):
     CONTENT_TYPE = "__content_type__"
     TASK_OPERATOR = "__task_operator__"
     ERROR = "__error__"
+    CELL_MSG = "__cell_msg__"
 
 
 class Shareable(dict):
@@ -104,6 +105,12 @@ class Shareable(dict):
 
     def get_peer_props(self):
         return self.get_header(ReservedHeaderKey.PEER_PROPS, None)
+
+    def get_cell_message(self):
+        return self.get_header(ReservedHeaderKey.CELL_MSG, None)
+
+    def set_cell_message(self, msg):
+        self.set_header(ReservedHeaderKey.CELL_MSG, msg)
 
     def get_peer_prop(self, key: str, default):
         props = self.get_peer_props()

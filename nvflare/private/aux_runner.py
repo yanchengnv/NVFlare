@@ -203,10 +203,11 @@ class AuxRunner(FLComponent):
                     if not isinstance(result, Shareable):
                         self.logger.error(f"reply of {channel}: {topic} must be Shareable but got {type(result)}")
                         result = make_reply(ReturnCode.ERROR)
-                    replies[target_name] = result
                 else:
                     src = self._convert_return_code(rc)
-                    replies[target_name] = make_reply(src)
+                    result = make_reply(src)
+                result.set_cell_message(v)
+                replies[target_name] = result
         return replies
 
     def multicast_aux_requests(

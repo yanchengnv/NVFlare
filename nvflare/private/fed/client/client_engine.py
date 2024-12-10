@@ -23,6 +23,7 @@ from nvflare.apis.event_type import EventType
 from nvflare.apis.fl_component import FLComponent
 from nvflare.apis.fl_constant import FLContextKey, MachineStatus, ProcessType, SystemComponents, WorkspaceConstants
 from nvflare.apis.fl_context import FLContext, FLContextManager
+from nvflare.apis.rm import RMEngine
 from nvflare.apis.shareable import Shareable
 from nvflare.apis.streaming import ConsumerFactory, ObjectProducer, StreamableEngine, StreamContext
 from nvflare.apis.utils.fl_context_utils import gen_new_peer_ctx
@@ -37,6 +38,7 @@ from nvflare.private.event import fire_event
 from nvflare.private.fed.server.job_meta_validator import JobMetaValidator
 from nvflare.private.fed.utils.app_deployer import AppDeployer
 from nvflare.private.fed.utils.fed_utils import security_close
+from nvflare.private.rm_runner import ReliableMessenger
 from nvflare.private.stream_runner import ObjectStreamer
 from nvflare.security.logging import secure_format_exception, secure_log_traceback
 
@@ -54,7 +56,7 @@ def _remove_custom_path():
         sys.path.remove(path)
 
 
-class ClientEngine(ClientEngineInternalSpec, StreamableEngine):
+class ClientEngine(ClientEngineInternalSpec, StreamableEngine, RMEngine):
     """ClientEngine runs in the client parent process (CP)."""
 
     def __init__(self, client: FederatedClient, args, rank, workers=5):
@@ -75,6 +77,7 @@ class ClientEngine(ClientEngineInternalSpec, StreamableEngine):
         self.admin_agent = None
         self.aux_runner = AuxRunner(self)
         self.object_streamer = ObjectStreamer(self.aux_runner)
+        self.reliable_messenger = ReliableMessenger(self.aux_runner)
         self.cell = None
 
         self.fl_ctx_mgr = FLContextManager(
@@ -285,6 +288,52 @@ class ClientEngine(ClientEngineInternalSpec, StreamableEngine):
         if self.object_streamer:
             self.object_streamer.shutdown()
 
+    def register_reliable_request_handler(self, channel: str, topic: str, handler_f, **handler_kwargs):
+        if not self.reliable_messenger:
+            raise RuntimeError("reliable messenger has not been created")
+
+        self.reliable_messenger.register_request_handler(
+            channel=channel,
+            topic=topic,
+            handler_f=handler_f,
+            **handler_kwargs,
+        )
+
+    def send_reliable_request(
+        self,
+        target: str,
+        channel: str,
+        topic: str,
+        request: Shareable,
+        per_msg_timeout: float,
+        tx_timeout: float,
+        fl_ctx: FLContext,
+        secure=False,
+        optional=False,
+    ) -> Shareable:
+        if not self.reliable_messenger:
+            raise RuntimeError("reliable messenger has not been created")
+
+        # We are CP: can only stream to SP
+        if target:
+            self.logger.debug(f"ignored target '{target}'")
+
+        return self.reliable_messenger.send_request(
+            target=AuxMsgTarget.server_target(),
+            channel=channel,
+            topic=topic,
+            request=request,
+            per_msg_timeout=per_msg_timeout,
+            tx_timeout=tx_timeout,
+            fl_ctx=fl_ctx,
+            secure=secure,
+            optional=optional,
+        )
+
+    def shutdown_reliable_messenger(self):
+        if self.reliable_messenger:
+            self.reliable_messenger.shutdown()
+
     def set_agent(self, admin_agent):
         self.admin_agent = admin_agent
 
@@ -430,6 +479,7 @@ class ClientEngine(ClientEngineInternalSpec, StreamableEngine):
         thread.start()
 
         self.shutdown_streamer()
+        self.shutdown_reliable_messenger()
         return "Shutdown the client..."
 
     def restart(self) -> str:

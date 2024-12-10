@@ -42,6 +42,7 @@ class Constant:
     WORKFLOW_PROGRESS_TIMEOUT = 3600.0
 
     # message topics
+    RM_CHANNEL = "xgb.rm_channel"
     TOPIC_XGB_REQUEST = "xgb.request"
     TOPIC_XGB_REQUEST_CHECK = "xgb.req_check"
     TOPIC_CLIENT_DONE = "xgb.client_done"

@@ -29,6 +29,7 @@ class Constant:
     WORKFLOW_PROGRESS_TIMEOUT = 3600.0
 
     # message topics
+    CHANNEL = "tie.rm_channel"
     TOPIC_APP_REQUEST = "tie.request"
     TOPIC_CLIENT_DONE = "tie.client_done"
 

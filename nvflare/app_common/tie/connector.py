@@ -19,9 +19,9 @@ from typing import Optional
 
 from nvflare.apis.fl_component import FLComponent
 from nvflare.apis.fl_context import FLContext
+from nvflare.apis.rm import RMEngine
 from nvflare.apis.shareable import Shareable
 from nvflare.apis.signal import Signal
-from nvflare.apis.utils.reliable_message import ReliableMessage
 from nvflare.app_common.tie.applet import Applet
 from nvflare.app_common.tie.defs import Constant
 from nvflare.fuel.f3.cellnet.fqcn import FQCN
@@ -239,13 +239,15 @@ class Connector(ABC, FLComponent):
             fl_ctx = self.engine.new_context()
 
         self.logger.debug(f"sending request with RM: {op=}")
-        return ReliableMessage.send_request(
+
+        assert isinstance(self.engine, RMEngine)
+        return self.engine.send_reliable_request(
             target=target,
+            channel=Constant.CHANNEL,
             topic=Constant.TOPIC_APP_REQUEST,
             request=request,
             per_msg_timeout=per_msg_timeout,
             tx_timeout=tx_timeout,
-            abort_signal=self.abort_signal,
             fl_ctx=fl_ctx,
         )
 

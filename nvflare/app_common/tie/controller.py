@@ -19,9 +19,9 @@ from nvflare.apis.client import Client
 from nvflare.apis.controller_spec import ClientTask, Task
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.impl.controller import Controller
+from nvflare.apis.rm import RMEngine
 from nvflare.apis.shareable import ReturnCode, Shareable, make_reply
 from nvflare.apis.signal import Signal
-from nvflare.apis.utils.reliable_message import ReliableMessage
 from nvflare.app_common.tie.connector import Connector
 from nvflare.fuel.utils.validation_utils import check_number_range, check_positive_number
 from nvflare.security.logging import secure_format_exception
@@ -207,7 +207,10 @@ class TieController(Controller, ABC):
             topic=Constant.TOPIC_CLIENT_DONE,
             message_handle_func=self._process_client_done,
         )
-        ReliableMessage.register_request_handler(
+
+        assert isinstance(engine, RMEngine)
+        engine.register_reliable_request_handler(
+            channel=Constant.CHANNEL,
             topic=Constant.TOPIC_APP_REQUEST,
             handler_f=self._handle_app_request,
             fl_ctx=fl_ctx,
@@ -288,7 +291,7 @@ class TieController(Controller, ABC):
         self._update_client_status(fl_ctx, client_done=True)
         return make_reply(ReturnCode.OK)
 
-    def _handle_app_request(self, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
+    def _handle_app_request(self, channel: str, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
         """Handle app request from applets on other sites
         It calls the connector to process the app request. If the connector fails to process the request, the
         job will be stopped.
@@ -301,7 +304,7 @@ class TieController(Controller, ABC):
         Returns: processing result as a Shareable object
 
         """
-        self.log_debug(fl_ctx, f"_handle_app_request {topic}")
+        self.log_debug(fl_ctx, f"_handle_app_request {channel=} {topic=}")
         op = request.get_header(Constant.MSG_KEY_OP)
         if self._is_stopped():
             self.log_warning(fl_ctx, f"dropped app request ({op=}) since server is already stopped")

@@ -29,10 +29,11 @@ from nvflare.apis.fl_constant import (
 )
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.fl_exception import UnsafeJobError
+from nvflare.apis.rm import RMEngine
 from nvflare.apis.shareable import ReservedHeaderKey, Shareable, make_reply
 from nvflare.apis.signal import Signal
+from nvflare.apis.streaming import StreamableEngine
 from nvflare.apis.utils.fl_context_utils import add_job_audit_event
-from nvflare.apis.utils.reliable_message import ReliableMessage
 from nvflare.apis.utils.task_utils import apply_filters
 from nvflare.fuel.f3.cellnet.fqcn import FQCN
 from nvflare.private.defs import SpecialTaskName, TaskConstant
@@ -590,8 +591,12 @@ class ClientRunner(TBI):
                 self.log_exception(fl_ctx, f"processing error in RUN execution: {secure_format_exception(e)}")
         finally:
             self.end_run_events_sequence()
-            ReliableMessage.shutdown()
+            assert isinstance(self.engine, StreamableEngine)
             self.engine.shutdown_streamer()
+
+            assert isinstance(self.engine, RMEngine)
+            self.engine.shutdown_reliable_messenger()
+
             with self.task_lock:
                 self.running_tasks = {}
 
@@ -640,7 +645,6 @@ class ClientRunner(TBI):
                 raise RuntimeError(f"cannot sync with Server Runner after {max_sync_timeout} seconds")
 
             self.log_info(fl_ctx, f"synced to Server Runner in {time.time() - sync_start} seconds")
-            ReliableMessage.enable(fl_ctx)
             self.fire_event(EventType.ABOUT_TO_START_RUN, fl_ctx)
             fl_ctx.set_prop(FLContextKey.APP_ROOT, app_root, sticky=True)
             fl_ctx.set_prop(FLContextKey.ARGS, args, sticky=True)

@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Union
 from nvflare.apis.fl_component import FLComponent
 from nvflare.apis.fl_constant import FLContextKey, ProcessType, ServerCommandKey, ServerCommandNames, SiteType
 from nvflare.apis.fl_context import FLContext, FLContextManager
+from nvflare.apis.rm import RMEngine
 from nvflare.apis.shareable import Shareable
 from nvflare.apis.streaming import ConsumerFactory, ObjectProducer, StreamableEngine, StreamContext
 from nvflare.apis.workspace import Workspace
@@ -29,6 +30,7 @@ from nvflare.private.aux_runner import AuxMsgTarget, AuxRunner
 from nvflare.private.defs import CellChannel, CellMessageHeaderKeys, new_cell_message
 from nvflare.private.event import fire_event
 from nvflare.private.fed.utils.fed_utils import create_job_processing_context_properties
+from nvflare.private.rm_runner import ReliableMessenger
 from nvflare.private.stream_runner import ObjectStreamer
 from nvflare.widgets.fed_event import ClientFedEventRunner
 from nvflare.widgets.info_collector import InfoCollector
@@ -58,7 +60,7 @@ class ClientRunInfo(object):
 GET_CLIENTS_RETRY = 300
 
 
-class ClientRunManager(ClientEngineExecutorSpec, StreamableEngine):
+class ClientRunManager(ClientEngineExecutorSpec, StreamableEngine, RMEngine):
     """ClientRunManager provides the ClientEngine APIs implementation running in the child process (CJ)."""
 
     def __init__(
@@ -90,8 +92,10 @@ class ClientRunManager(ClientEngineExecutorSpec, StreamableEngine):
         self.components = components
         self.aux_runner = AuxRunner(self)
         self.object_streamer = ObjectStreamer(self.aux_runner)
+        self.reliable_messenger = ReliableMessenger(self.aux_runner)
         self.add_handler(self.aux_runner)
         self.add_handler(self.object_streamer)
+        self.add_handler(self.reliable_messenger)
         self.conf = conf
         self.cell = None
 
@@ -378,6 +382,56 @@ class ClientRunManager(ClientEngineExecutorSpec, StreamableEngine):
     def shutdown_streamer(self):
         if self.object_streamer:
             self.object_streamer.shutdown()
+
+    def register_reliable_request_handler(self, channel: str, topic: str, handler_f, **handler_kwargs):
+        if not self.reliable_messenger:
+            raise RuntimeError("reliable messenger has not been created")
+
+        self.reliable_messenger.register_request_handler(
+            channel=channel,
+            topic=topic,
+            handler_f=handler_f,
+            **handler_kwargs,
+        )
+
+    def send_reliable_request(
+        self,
+        target: str,
+        channel: str,
+        topic: str,
+        request: Shareable,
+        per_msg_timeout: float,
+        tx_timeout: float,
+        fl_ctx: FLContext,
+        secure=False,
+        optional=False,
+    ) -> Shareable:
+        if not self.reliable_messenger:
+            raise RuntimeError("reliable messenger has not been created")
+
+        if not target:
+            target = AuxMsgTarget.server_target()
+        else:
+            target = self._get_aux_msg_target(target)
+
+        if not target:
+            raise ValueError(f"invalid target '{target}'")
+
+        return self.reliable_messenger.send_request(
+            target=target,
+            channel=channel,
+            topic=topic,
+            request=request,
+            per_msg_timeout=per_msg_timeout,
+            tx_timeout=tx_timeout,
+            fl_ctx=fl_ctx,
+            secure=secure,
+            optional=optional,
+        )
+
+    def shutdown_reliable_messenger(self):
+        if self.reliable_messenger:
+            self.reliable_messenger.shutdown()
 
     def abort_app(self, job_id: str, fl_ctx: FLContext):
         runner = fl_ctx.get_prop(key=FLContextKey.RUNNER, default=None)

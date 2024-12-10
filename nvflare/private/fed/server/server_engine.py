@@ -41,6 +41,7 @@ from nvflare.apis.fl_snapshot import RunSnapshot
 from nvflare.apis.impl.job_def_manager import JobDefManagerSpec
 from nvflare.apis.job_def import Job
 from nvflare.apis.job_launcher_spec import JobLauncherSpec
+from nvflare.apis.rm import RMEngine
 from nvflare.apis.shareable import ReturnCode, Shareable, make_reply
 from nvflare.apis.streaming import ConsumerFactory, ObjectProducer, StreamableEngine, StreamContext
 from nvflare.apis.utils.fl_context_utils import gen_new_peer_ctx, get_serializable_data
@@ -78,7 +79,7 @@ from .server_engine_internal_spec import EngineInfo, ServerEngineInternalSpec
 from .server_status import ServerStatus
 
 
-class ServerEngine(ServerEngineInternalSpec, StreamableEngine):
+class ServerEngine(ServerEngineInternalSpec, StreamableEngine, RMEngine):
     def __init__(self, server, args, client_manager: ClientManager, snapshot_persistor, workers=3):
         """Server engine.
 
@@ -653,6 +654,62 @@ class ServerEngine(ServerEngineInternalSpec, StreamableEngine):
         if self.run_manager and self.run_manager.object_streamer:
             self.run_manager.object_streamer.shutdown()
 
+    def register_reliable_request_handler(self, channel: str, topic: str, handler_f, **handler_kwargs):
+        if not self.run_manager:
+            raise RuntimeError("run_manager has not been created")
+
+        if not self.run_manager.reliable_messenger:
+            raise RuntimeError("reliable_messenger has not been created")
+
+        self.run_manager.reliable_messenger.register_request_handler(
+            channel=channel,
+            topic=topic,
+            handler_f=handler_f,
+            **handler_kwargs,
+        )
+
+    def send_reliable_request(
+        self,
+        target: str,
+        channel: str,
+        topic: str,
+        request: Shareable,
+        per_msg_timeout: float,
+        tx_timeout: float,
+        fl_ctx: FLContext,
+        secure=False,
+        optional=False,
+    ) -> Shareable:
+        if not self.run_manager:
+            raise RuntimeError("run_manager has not been created")
+
+        if not self.run_manager.reliable_messenger:
+            raise RuntimeError("reliable_messenger has not been created")
+
+        if not target:
+            target = AuxMsgTarget.server_target()
+        else:
+            target = self._get_aux_msg_target(target)
+
+        if not target:
+            raise ValueError(f"invalid target '{target}'")
+
+        return self.run_manager.reliable_messenger.send_request(
+            target=target,
+            channel=channel,
+            topic=topic,
+            request=request,
+            per_msg_timeout=per_msg_timeout,
+            tx_timeout=tx_timeout,
+            fl_ctx=fl_ctx,
+            secure=secure,
+            optional=optional,
+        )
+
+    def shutdown_reliable_messenger(self):
+        if self.run_manager and self.run_manager.reliable_messenger:
+            self.run_manager.reliable_messenger.shutdown()
+
     def sync_clients_from_main_process(self):
         # repeatedly ask the parent process to get participating clients until we receive the result
         # or timed out after 30 secs (already tried 30 times).
@@ -956,6 +1013,7 @@ class ServerEngine(ServerEngineInternalSpec, StreamableEngine):
     def close(self):
         self.executor.shutdown()
         self.shutdown_streamer()
+        self.shutdown_reliable_messenger()
 
 
 def server_shutdown(server, touch_file):

@@ -17,6 +17,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from threading import Lock
 from typing import Any, List, Tuple
 
+from nvflare.apis.aux_spec import AuxMessenger
 from nvflare.apis.fl_component import FLComponent
 from nvflare.apis.fl_constant import ReturnCode
 from nvflare.apis.fl_context import FLContext
@@ -26,7 +27,6 @@ from nvflare.fuel.f3.cellnet.registry import Registry
 from nvflare.fuel.utils.config_service import ConfigService
 from nvflare.fuel.utils.log_utils import get_obj_logger
 from nvflare.fuel.utils.validation_utils import check_callable, check_object_type, check_str
-from nvflare.private.aux_runner import AuxMsgTarget, AuxRunner
 from nvflare.security.logging import secure_format_exception
 
 # Topics for streaming messages
@@ -103,9 +103,9 @@ class _ConsumerInfo:
 
 
 class ObjectStreamer(FLComponent):
-    def __init__(self, aux_runner: AuxRunner):
+    def __init__(self, messenger: AuxMessenger):
         FLComponent.__init__(self)
-        self.aux_runner = aux_runner
+        self.messenger = messenger
         self.registry = Registry()
         self.tx_lock = Lock()
         self.tx_table = {}  # tx_id => _ProcessorInfo
@@ -115,11 +115,11 @@ class ObjectStreamer(FLComponent):
         max_concurrent_streaming_sessions = ConfigService.get_int_var("max_concurrent_streaming_sessions", default=20)
         self.streaming_executor = ThreadPoolExecutor(max_workers=max_concurrent_streaming_sessions)
 
-        aux_runner.register_aux_message_handler(
+        messenger.register_aux_message_handler(
             topic=TOPIC_STREAM_REQUEST,
             message_handle_func=self._handle_request,
         )
-        aux_runner.register_aux_message_handler(
+        messenger.register_aux_message_handler(
             topic=TOPIC_STREAM_ABORT,
             message_handle_func=self._handle_abort,
         )
@@ -307,7 +307,7 @@ class ObjectStreamer(FLComponent):
 
     def _notify_abort_streaming(
         self,
-        targets: List[AuxMsgTarget],
+        targets: List[str],
         tx_id: str,
         secure: bool,
         fl_ctx: FLContext,
@@ -325,7 +325,7 @@ class ObjectStreamer(FLComponent):
         """
         msg = make_reply(ReturnCode.TASK_ABORTED)
         msg.set_header(HeaderKey.TX_ID, tx_id)
-        self.aux_runner.send_aux_request(
+        self.messenger.send_aux_request(
             targets=targets,
             topic=TOPIC_STREAM_ABORT,
             request=msg,
@@ -340,7 +340,7 @@ class ObjectStreamer(FLComponent):
         channel: str,
         topic: str,
         stream_ctx: StreamContext,
-        targets: List[AuxMsgTarget],
+        targets: List[str],
         producer: ObjectProducer,
         fl_ctx: FLContext,
         secure=False,
@@ -420,7 +420,7 @@ class ObjectStreamer(FLComponent):
             seq += 1
 
             # broadcast the message to all targets
-            replies = self.aux_runner.send_aux_request(
+            replies = self.messenger.send_aux_request(
                 topic=TOPIC_STREAM_REQUEST,
                 targets=targets,
                 request=request,
@@ -448,7 +448,7 @@ class ObjectStreamer(FLComponent):
         channel: str,
         topic: str,
         stream_ctx: StreamContext,
-        targets: List[AuxMsgTarget],
+        targets: List[str],
         producer: ObjectProducer,
         fl_ctx: FLContext,
         secure=False,

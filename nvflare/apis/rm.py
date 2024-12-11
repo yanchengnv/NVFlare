@@ -30,8 +30,8 @@ class RMEngine(ABC):
         per_msg_timeout: float,
         tx_timeout: float,
         fl_ctx: FLContext,
-        secure=False,
         optional=False,
+        secure=False,
     ) -> Shareable:
         """Send a reliable request.
 

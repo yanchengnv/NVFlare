@@ -18,9 +18,7 @@ from typing import Dict, List, Optional, Union
 from nvflare.apis.fl_component import FLComponent
 from nvflare.apis.fl_constant import FLContextKey, ProcessType, ServerCommandKey, ServerCommandNames, SiteType
 from nvflare.apis.fl_context import FLContext, FLContextManager
-from nvflare.apis.rm import RMEngine
 from nvflare.apis.shareable import Shareable
-from nvflare.apis.streaming import ConsumerFactory, ObjectProducer, StreamableEngine, StreamContext
 from nvflare.apis.workspace import Workspace
 from nvflare.fuel.f3.cellnet.core_cell import FQCN
 from nvflare.fuel.f3.cellnet.defs import MessageHeaderKey
@@ -30,8 +28,7 @@ from nvflare.private.aux_runner import AuxMsgTarget, AuxRunner
 from nvflare.private.defs import CellChannel, CellMessageHeaderKeys, new_cell_message
 from nvflare.private.event import fire_event
 from nvflare.private.fed.utils.fed_utils import create_job_processing_context_properties
-from nvflare.private.rm_runner import ReliableMessenger
-from nvflare.private.stream_runner import ObjectStreamer
+from nvflare.private.msg_engine import MessagingEngine
 from nvflare.widgets.fed_event import ClientFedEventRunner
 from nvflare.widgets.info_collector import InfoCollector
 from nvflare.widgets.widget import Widget, WidgetID
@@ -60,7 +57,7 @@ class ClientRunInfo(object):
 GET_CLIENTS_RETRY = 300
 
 
-class ClientRunManager(ClientEngineExecutorSpec, StreamableEngine, RMEngine):
+class ClientRunManager(ClientEngineExecutorSpec, MessagingEngine):
     """ClientRunManager provides the ClientEngine APIs implementation running in the child process (CJ)."""
 
     def __init__(
@@ -81,21 +78,18 @@ class ClientRunManager(ClientEngineExecutorSpec, StreamableEngine, RMEngine):
             workspace: workspace
             client: FL client object
             components: available FL components
-            handlers: available handlers
+            handlers: available handlers.
             conf: ClientJsonConfigurator object
         """
         super().__init__()
-
+        MessagingEngine.__init__(self, messenger=self)
         self.client = client
         self.handlers = handlers
         self.workspace = workspace
         self.components = components
         self.aux_runner = AuxRunner(self)
-        self.object_streamer = ObjectStreamer(self.aux_runner)
-        self.reliable_messenger = ReliableMessenger(self.aux_runner)
         self.add_handler(self.aux_runner)
-        self.add_handler(self.object_streamer)
-        self.add_handler(self.reliable_messenger)
+
         self.conf = conf
         self.cell = None
 
@@ -333,105 +327,6 @@ class ClientRunManager(ClientEngineExecutorSpec, StreamableEngine, RMEngine):
 
     def register_aux_message_handler(self, topic: str, message_handle_func):
         self.aux_runner.register_aux_message_handler(topic, message_handle_func)
-
-    def fire_and_forget_aux_request(
-        self, topic: str, request: Shareable, fl_ctx: FLContext, optional=False, secure=False
-    ) -> dict:
-        return self.send_aux_request(
-            targets=None, topic=topic, request=request, timeout=0.0, fl_ctx=fl_ctx, optional=optional, secure=secure
-        )
-
-    def stream_objects(
-        self,
-        channel: str,
-        topic: str,
-        stream_ctx: StreamContext,
-        targets: List[str],
-        producer: ObjectProducer,
-        fl_ctx: FLContext,
-        optional=False,
-        secure=False,
-    ):
-        if not self.object_streamer:
-            raise RuntimeError("object streamer has not been created")
-
-        return self.object_streamer.stream(
-            channel=channel,
-            topic=topic,
-            stream_ctx=stream_ctx,
-            targets=self._to_aux_msg_targets(targets),
-            producer=producer,
-            fl_ctx=fl_ctx,
-            secure=secure,
-            optional=optional,
-        )
-
-    def register_stream_processing(
-        self,
-        channel: str,
-        topic: str,
-        factory: ConsumerFactory,
-        stream_done_cb=None,
-        **cb_kwargs,
-    ):
-        if not self.object_streamer:
-            raise RuntimeError("object streamer has not been created")
-
-        self.object_streamer.register_stream_processing(channel, topic, factory, stream_done_cb, **cb_kwargs)
-
-    def shutdown_streamer(self):
-        if self.object_streamer:
-            self.object_streamer.shutdown()
-
-    def register_reliable_request_handler(self, channel: str, topic: str, handler_f, **handler_kwargs):
-        if not self.reliable_messenger:
-            raise RuntimeError("reliable messenger has not been created")
-
-        self.reliable_messenger.register_request_handler(
-            channel=channel,
-            topic=topic,
-            handler_f=handler_f,
-            **handler_kwargs,
-        )
-
-    def send_reliable_request(
-        self,
-        target: str,
-        channel: str,
-        topic: str,
-        request: Shareable,
-        per_msg_timeout: float,
-        tx_timeout: float,
-        fl_ctx: FLContext,
-        secure=False,
-        optional=False,
-    ) -> Shareable:
-        if not self.reliable_messenger:
-            raise RuntimeError("reliable messenger has not been created")
-
-        if not target:
-            target = AuxMsgTarget.server_target()
-        else:
-            target = self._get_aux_msg_target(target)
-
-        if not target:
-            raise ValueError(f"invalid target '{target}'")
-
-        return self.reliable_messenger.send_request(
-            target=target,
-            channel=channel,
-            topic=topic,
-            request=request,
-            per_msg_timeout=per_msg_timeout,
-            tx_timeout=tx_timeout,
-            fl_ctx=fl_ctx,
-            secure=secure,
-            optional=optional,
-        )
-
-    def shutdown_reliable_messenger(self):
-        if self.reliable_messenger:
-            self.reliable_messenger.shutdown()
 
     def abort_app(self, job_id: str, fl_ctx: FLContext):
         runner = fl_ctx.get_prop(key=FLContextKey.RUNNER, default=None)

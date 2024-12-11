@@ -14,8 +14,8 @@
 
 import time
 from abc import ABC, abstractmethod
-from typing import Dict, List, Union
 
+from nvflare.apis.aux_spec import AuxMessenger
 from nvflare.apis.client_engine_spec import ClientEngineSpec
 from nvflare.apis.engine_spec import EngineSpec
 from nvflare.apis.fl_context import FLContext
@@ -42,7 +42,7 @@ class TaskAssignment(object):
         self.receive_time = time.time()
 
 
-class ClientEngineExecutorSpec(ClientEngineSpec, EngineSpec, ABC):
+class ClientEngineExecutorSpec(AuxMessenger, ClientEngineSpec, EngineSpec, ABC):
     """The ClientEngineExecutorSpec defines the ClientEngine APIs running in the child process."""
 
     @abstractmethod
@@ -63,101 +63,6 @@ class ClientEngineExecutorSpec(ClientEngineSpec, EngineSpec, ABC):
 
     @abstractmethod
     def get_all_components(self) -> dict:
-        pass
-
-    @abstractmethod
-    def register_aux_message_handler(self, topic: str, message_handle_func):
-        """Register aux message handling function with specified topics.
-
-        Exception is raised when:
-            a handler is already registered for the topic;
-            bad topic - must be a non-empty string
-            bad message_handle_func - must be callable
-
-        Implementation Note:
-        This method should simply call the ClientAuxRunner's register_aux_message_handler method.
-
-        Args:
-            topic: the topic to be handled by the func
-            message_handle_func: the func to handle the message. Must follow aux_message_handle_func_signature.
-
-        """
-        pass
-
-    @abstractmethod
-    def send_aux_request(
-        self,
-        targets: Union[None, str, List[str]],
-        topic: str,
-        request: Shareable,
-        timeout: float,
-        fl_ctx: FLContext,
-        optional=False,
-        secure: bool = False,
-    ) -> dict:
-        """Send a request to Server via the aux channel.
-
-        Implementation: simply calls the ClientAuxRunner's send_aux_request method.
-
-        Args:
-            targets: aux messages targets. None or empty list means the server.
-            topic: topic of the request
-            request: request to be sent
-            timeout: number of secs to wait for replies. 0 means fire-and-forget.
-            fl_ctx: FL context
-            optional: whether the request is optional
-            secure: should the request sent in the secure way
-
-        Returns:
-            a dict of reply Shareable in the format of:
-                { site_name: reply_shareable }
-
-        """
-        pass
-
-    @abstractmethod
-    def multicast_aux_requests(
-        self,
-        topic: str,
-        target_requests: Dict[str, Shareable],
-        timeout: float,
-        fl_ctx: FLContext,
-        optional: bool = False,
-        secure: bool = False,
-    ) -> dict:
-        """Send requests to specified targets (server or other clients) via the aux channel.
-
-        Implementation: simply calls the AuxRunner's multicast_aux_requests method.
-
-        Args:
-            topic: topic of the request
-            target_requests: requests of the targets. Different target can have different request.
-            timeout: amount of time to wait for responses. 0 means fire and forget.
-            fl_ctx: FL context
-            optional: whether this request is optional
-            secure: whether to send the aux request in P2P secure
-
-        Returns: a dict of replies (client name => reply Shareable)
-
-        """
-        pass
-
-    @abstractmethod
-    def fire_and_forget_aux_request(
-        self, topic: str, request: Shareable, fl_ctx: FLContext, optional=False, secure=False
-    ) -> Shareable:
-        """Send an async request to Server via the aux channel.
-
-        Args:
-            topic: topic of the request.
-            request: request to be sent
-            fl_ctx: FL context
-            optional: whether the request is optional
-            secure: whether to send the message in P2P secure mode
-
-        Returns:
-
-        """
         pass
 
     @abstractmethod

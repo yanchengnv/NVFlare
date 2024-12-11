@@ -17,15 +17,14 @@ import re
 import shutil
 import sys
 import threading
-from typing import List
+from typing import Dict
 
+from nvflare.apis.aux_spec import AuxMessenger
 from nvflare.apis.event_type import EventType
 from nvflare.apis.fl_component import FLComponent
 from nvflare.apis.fl_constant import FLContextKey, MachineStatus, ProcessType, SystemComponents, WorkspaceConstants
 from nvflare.apis.fl_context import FLContext, FLContextManager
-from nvflare.apis.rm import RMEngine
 from nvflare.apis.shareable import Shareable
-from nvflare.apis.streaming import ConsumerFactory, ObjectProducer, StreamableEngine, StreamContext
 from nvflare.apis.utils.fl_context_utils import gen_new_peer_ctx
 from nvflare.apis.workspace import Workspace
 from nvflare.fuel.f3.cellnet.cell import Cell
@@ -38,8 +37,7 @@ from nvflare.private.event import fire_event
 from nvflare.private.fed.server.job_meta_validator import JobMetaValidator
 from nvflare.private.fed.utils.app_deployer import AppDeployer
 from nvflare.private.fed.utils.fed_utils import security_close
-from nvflare.private.rm_runner import ReliableMessenger
-from nvflare.private.stream_runner import ObjectStreamer
+from nvflare.private.msg_engine import MessagingEngine
 from nvflare.security.logging import secure_format_exception, secure_log_traceback
 
 from .client_engine_internal_spec import ClientEngineInternalSpec
@@ -56,7 +54,7 @@ def _remove_custom_path():
         sys.path.remove(path)
 
 
-class ClientEngine(ClientEngineInternalSpec, StreamableEngine, RMEngine):
+class ClientEngine(ClientEngineInternalSpec, AuxMessenger, MessagingEngine):
     """ClientEngine runs in the client parent process (CP)."""
 
     def __init__(self, client: FederatedClient, args, rank, workers=5):
@@ -69,6 +67,7 @@ class ClientEngine(ClientEngineInternalSpec, StreamableEngine, RMEngine):
             workers: number of workers
         """
         super().__init__()
+        MessagingEngine.__init__(self, messenger=self)
         self.client = client
         self.client_name = client.client_name
         self.args = args
@@ -76,8 +75,6 @@ class ClientEngine(ClientEngineInternalSpec, StreamableEngine, RMEngine):
         self.client_executor = JobExecutor(client, os.path.join(args.workspace, "startup"))
         self.admin_agent = None
         self.aux_runner = AuxRunner(self)
-        self.object_streamer = ObjectStreamer(self.aux_runner)
-        self.reliable_messenger = ReliableMessenger(self.aux_runner)
         self.cell = None
 
         self.fl_ctx_mgr = FLContextManager(
@@ -168,6 +165,7 @@ class ClientEngine(ClientEngineInternalSpec, StreamableEngine, RMEngine):
 
     def send_aux_request(
         self,
+        targets: [],
         topic: str,
         request: Shareable,
         timeout: float,
@@ -180,6 +178,7 @@ class ClientEngine(ClientEngineInternalSpec, StreamableEngine, RMEngine):
         Implementation: simply calls the AuxRunner's send_aux_request method.
 
         Args:
+            targets: not used
             topic: topic of the request.
             request: request to be sent
             timeout: number of secs to wait for replies. 0 means fire-and-forget.
@@ -207,132 +206,29 @@ class ClientEngine(ClientEngineInternalSpec, StreamableEngine, RMEngine):
         else:
             return Shareable()
 
-    def stream_objects(
+    def multicast_aux_requests(
         self,
-        channel: str,
         topic: str,
-        stream_ctx: StreamContext,
-        targets: List[str],
-        producer: ObjectProducer,
+        target_requests: Dict[str, Shareable],
+        timeout: float,
         fl_ctx: FLContext,
-        optional=False,
-        secure=False,
-    ):
-        """Send a stream of Shareable objects to receivers.
+        optional: bool = False,
+        secure: bool = False,
+    ) -> dict:
+        """No need for this since targets can only be server.
 
         Args:
-            channel: the channel for this stream
-            topic: topic of the stream
-            stream_ctx: context of the stream
-            targets: receiving sites
-            producer: the ObjectProducer that can produces the stream of Shareable objects
-            fl_ctx: the FLContext object
-            optional: whether the stream is optional
-            secure: whether to use P2P security
+            topic:
+            target_requests:
+            timeout:
+            fl_ctx:
+            optional:
+            secure:
 
-        Returns: result from the generator's reply processing
+        Returns:
 
         """
-        if not self.object_streamer:
-            raise RuntimeError("object streamer has not been created")
-
-        # We are CP: can only stream to SP
-        if targets:
-            for t in targets:
-                self.logger.debug(f"ignored target: {t}")
-
-        return self.object_streamer.stream(
-            channel=channel,
-            topic=topic,
-            stream_ctx=stream_ctx,
-            targets=[AuxMsgTarget.server_target()],
-            producer=producer,
-            fl_ctx=fl_ctx,
-            secure=secure,
-            optional=optional,
-        )
-
-    def register_stream_processing(
-        self,
-        channel: str,
-        topic: str,
-        factory: ConsumerFactory,
-        stream_done_cb=None,
-        **cb_kwargs,
-    ):
-        """Register a ConsumerFactory for specified app channel and topic.
-        Once a new streaming request is received for the channel/topic, the registered factory will be used
-        to create an ObjectConsumer object to handle the new stream.
-
-        Note: the factory should generate a new ObjectConsumer every time get_consumer() is called. This is because
-        multiple streaming sessions could be going on at the same time. Each streaming session should have its
-        own ObjectConsumer.
-
-        Args:
-            channel: app channel
-            topic: app topic
-            factory: the factory to be registered
-            stream_done_cb: the callback to be called when streaming is done on receiving side
-
-        Returns: None
-
-        """
-        if not self.object_streamer:
-            raise RuntimeError("object streamer has not been created")
-
-        self.object_streamer.register_stream_processing(
-            topic=topic, channel=channel, factory=factory, stream_done_cb=stream_done_cb, **cb_kwargs
-        )
-
-    def shutdown_streamer(self):
-        if self.object_streamer:
-            self.object_streamer.shutdown()
-
-    def register_reliable_request_handler(self, channel: str, topic: str, handler_f, **handler_kwargs):
-        if not self.reliable_messenger:
-            raise RuntimeError("reliable messenger has not been created")
-
-        self.reliable_messenger.register_request_handler(
-            channel=channel,
-            topic=topic,
-            handler_f=handler_f,
-            **handler_kwargs,
-        )
-
-    def send_reliable_request(
-        self,
-        target: str,
-        channel: str,
-        topic: str,
-        request: Shareable,
-        per_msg_timeout: float,
-        tx_timeout: float,
-        fl_ctx: FLContext,
-        secure=False,
-        optional=False,
-    ) -> Shareable:
-        if not self.reliable_messenger:
-            raise RuntimeError("reliable messenger has not been created")
-
-        # We are CP: can only stream to SP
-        if target:
-            self.logger.debug(f"ignored target '{target}'")
-
-        return self.reliable_messenger.send_request(
-            target=AuxMsgTarget.server_target(),
-            channel=channel,
-            topic=topic,
-            request=request,
-            per_msg_timeout=per_msg_timeout,
-            tx_timeout=tx_timeout,
-            fl_ctx=fl_ctx,
-            secure=secure,
-            optional=optional,
-        )
-
-    def shutdown_reliable_messenger(self):
-        if self.reliable_messenger:
-            self.reliable_messenger.shutdown()
+        pass
 
     def set_agent(self, admin_agent):
         self.admin_agent = admin_agent
@@ -478,8 +374,7 @@ class ClientEngine(ClientEngineInternalSpec, StreamableEngine, RMEngine):
         thread = threading.Thread(target=shutdown_client, args=(self.client, touch_file))
         thread.start()
 
-        self.shutdown_streamer()
-        self.shutdown_reliable_messenger()
+        self.shutdown_messaging()
         return "Shutdown the client..."
 
     def restart(self) -> str:

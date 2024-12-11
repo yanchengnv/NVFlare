@@ -17,6 +17,7 @@ import threading
 import time
 import uuid
 
+from nvflare.apis.aux_spec import AuxMessenger
 from nvflare.apis.fl_component import FLComponent
 from nvflare.apis.fl_constant import ConfigVarName, SystemConfigs
 from nvflare.apis.fl_context import FLContext
@@ -29,8 +30,7 @@ from nvflare.fuel.f3.cellnet.registry import Registry
 from nvflare.fuel.f3.message import Message
 from nvflare.fuel.utils.config_service import ConfigService
 from nvflare.fuel.utils.log_utils import get_obj_logger
-from nvflare.fuel.utils.validation_utils import check_callable, check_object_type, check_positive_number, check_str
-from nvflare.private.aux_runner import AuxMsgTarget, AuxRunner
+from nvflare.fuel.utils.validation_utils import check_callable, check_positive_number, check_str
 from nvflare.security.logging import secure_format_exception, secure_format_traceback
 
 # Operation Types
@@ -65,11 +65,11 @@ PROP_KEY_TOPIC = "RM.TOPIC"
 PROP_KEY_OP = "RM.OP"
 
 
-def _extract_result(reply: dict, target: AuxMsgTarget):
+def _extract_result(reply: dict, target: str):
     err_rc = ReturnCode.COMMUNICATION_ERROR
     if not isinstance(reply, dict):
         return make_reply(err_rc), err_rc
-    result = reply.get(target.name)
+    result = reply.get(target)
     if not result:
         return make_reply(err_rc), err_rc
     return result, result.get_return_code()
@@ -118,11 +118,9 @@ class _RequestReceiver:
             op = request.get_header(HEADER_OP)
             peer_ctx = fl_ctx.get_peer_context()
             assert isinstance(peer_ctx, FLContext)
-            source_name = peer_ctx.get_identity_name()
+            self.source = peer_ctx.get_identity_name()
             msg = request.get_cell_message()
             assert isinstance(msg, Message)
-            source_fqcn = msg.get_header(MessageHeaderKey.ORIGIN)
-            self.source = AuxMsgTarget(source_name, source_fqcn)
             self.msg_secure = msg.get_header(MessageHeaderKey.SECURE, False)
             self.msg_optional = msg.get_header(MessageHeaderKey.OPTIONAL, False)
 
@@ -244,7 +242,7 @@ class _ReplyReceiver:
 
 
 class ReliableMessenger(FLComponent):
-    def __init__(self, aux_runner: AuxRunner):
+    def __init__(self, aux_runner: AuxMessenger):
         FLComponent.__init__(self)
         self.aux_runner = aux_runner
         self.registry = Registry()
@@ -457,15 +455,15 @@ class ReliableMessenger(FLComponent):
 
     def send_request(
         self,
-        target: AuxMsgTarget,
+        target: str,
         channel: str,
         topic: str,
         request: Shareable,
         per_msg_timeout: float,
         tx_timeout: float,
         fl_ctx: FLContext,
-        secure=False,
         optional=False,
+        secure=False,
     ) -> Shareable:
         """Send a request reliably.
 
@@ -488,7 +486,7 @@ class ReliableMessenger(FLComponent):
             the request will be sent only once without retrying.
 
         """
-        check_object_type("target", target, AuxMsgTarget)
+        check_str("target", target)
         check_positive_number("per_msg_timeout", per_msg_timeout)
         if tx_timeout:
             check_positive_number("tx_timeout", tx_timeout)
@@ -520,7 +518,7 @@ class ReliableMessenger(FLComponent):
 
     def _send_request(
         self,
-        target: AuxMsgTarget,
+        target: str,
         request: Shareable,
         fl_ctx: FLContext,
         receiver: _ReplyReceiver,
@@ -602,7 +600,7 @@ class ReliableMessenger(FLComponent):
 
     def _query_result(
         self,
-        target: AuxMsgTarget,
+        target: str,
         abort_signal: Signal,
         fl_ctx: FLContext,
         receiver: _ReplyReceiver,

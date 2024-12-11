@@ -20,15 +20,14 @@ from nvflare.apis.event_type import EventType
 from nvflare.apis.fl_component import FLComponent
 from nvflare.apis.fl_constant import FilterKey, FLContextKey, ReservedKey, ReservedTopic, ReturnCode
 from nvflare.apis.fl_context import FLContext
-from nvflare.apis.rm import RMEngine
 from nvflare.apis.server_engine_spec import ServerEngineSpec
 from nvflare.apis.shareable import ReservedHeaderKey, Shareable, make_reply
 from nvflare.apis.signal import Signal
-from nvflare.apis.streaming import StreamableEngine
 from nvflare.apis.utils.fl_context_utils import add_job_audit_event
 from nvflare.apis.utils.task_utils import apply_filters
 from nvflare.private.defs import SpecialTaskName, TaskConstant
 from nvflare.private.fed.tbi import TBI
+from nvflare.private.msg_engine import MessagingEngine
 from nvflare.private.privacy_manager import Scope
 from nvflare.security.logging import secure_format_exception
 from nvflare.widgets.info_collector import GroupInfoCollector, InfoCollector
@@ -217,11 +216,8 @@ class ServerRunner(TBI):
                     self.fire_event(EventType.END_RUN, fl_ctx)
                     self.log_info(fl_ctx, "END_RUN fired")
 
-            assert isinstance(self.engine, StreamableEngine)
-            self.engine.shutdown_streamer()
-
-            assert isinstance(self.engine, RMEngine)
-            self.engine.shutdown_reliable_messenger()
+            assert isinstance(self.engine, MessagingEngine)
+            self.engine.shutdown_messaging()
 
             self.log_info(fl_ctx, "Server runner finished.")
 

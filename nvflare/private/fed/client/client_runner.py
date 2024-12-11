@@ -29,10 +29,8 @@ from nvflare.apis.fl_constant import (
 )
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.fl_exception import UnsafeJobError
-from nvflare.apis.rm import RMEngine
 from nvflare.apis.shareable import ReservedHeaderKey, Shareable, make_reply
 from nvflare.apis.signal import Signal
-from nvflare.apis.streaming import StreamableEngine
 from nvflare.apis.utils.fl_context_utils import add_job_audit_event
 from nvflare.apis.utils.task_utils import apply_filters
 from nvflare.fuel.f3.cellnet.fqcn import FQCN
@@ -40,6 +38,7 @@ from nvflare.private.defs import SpecialTaskName, TaskConstant
 from nvflare.private.fed.client.client_engine_executor_spec import ClientEngineExecutorSpec, TaskAssignment
 from nvflare.private.fed.tbi import TBI
 from nvflare.private.json_configer import ConfigError
+from nvflare.private.msg_engine import MessagingEngine
 from nvflare.private.privacy_manager import Scope
 from nvflare.security.logging import secure_format_exception
 from nvflare.widgets.info_collector import GroupInfoCollector, InfoCollector
@@ -591,11 +590,8 @@ class ClientRunner(TBI):
                 self.log_exception(fl_ctx, f"processing error in RUN execution: {secure_format_exception(e)}")
         finally:
             self.end_run_events_sequence()
-            assert isinstance(self.engine, StreamableEngine)
-            self.engine.shutdown_streamer()
-
-            assert isinstance(self.engine, RMEngine)
-            self.engine.shutdown_reliable_messenger()
+            assert isinstance(self.engine, MessagingEngine)
+            self.engine.shutdown_messaging()
 
             with self.task_lock:
                 self.running_tasks = {}

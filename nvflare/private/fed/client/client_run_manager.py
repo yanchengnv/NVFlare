@@ -81,7 +81,6 @@ class ClientRunManager(ClientEngineExecutorSpec, MessagingEngine):
             handlers: available handlers.
             conf: ClientJsonConfigurator object
         """
-        super().__init__()
         MessagingEngine.__init__(self, messenger=self)
         self.client = client
         self.handlers = handlers

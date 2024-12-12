@@ -66,7 +66,6 @@ class ClientEngine(ClientEngineInternalSpec, AuxMessenger, MessagingEngine):
             rank: local process rank
             workers: number of workers
         """
-        super().__init__()
         MessagingEngine.__init__(self, messenger=self)
         self.client = client
         self.client_name = client.client_name

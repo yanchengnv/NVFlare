@@ -425,6 +425,8 @@ class ServerEngine(ServerEngineInternalSpec, MessagingEngine):
     def _handle_aux_message(self, request: CellMessage) -> CellMessage:
         assert isinstance(request, CellMessage), "request must be CellMessage but got {}".format(type(request))
         data = request.payload
+        if isinstance(data, Shareable):
+            data.set_cell_message(request)
 
         topic = request.get_header(MessageHeaderKey.TOPIC)
         with self.new_context() as fl_ctx:

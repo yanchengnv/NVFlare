@@ -17,6 +17,7 @@ from typing import Optional
 
 import xgboost
 
+from nvflare.apis.aux_spec import AuxMessenger
 from nvflare.apis.client import Client
 from nvflare.apis.controller_spec import ClientTask, Task
 from nvflare.apis.fl_constant import FLContextKey
@@ -185,13 +186,12 @@ class XGBController(Controller):
             channel=Constant.RM_CHANNEL,
             topic=Constant.TOPIC_XGB_REQUEST,
             handler_f=self._process_xgb_request,
-            fl_ctx=fl_ctx,
         )
-        engine.register_reliable_request_handler(
-            channel=Constant.RM_CHANNEL,
+
+        assert isinstance(engine, AuxMessenger)
+        engine.register_aux_message_handler(
             topic=Constant.TOPIC_CLIENT_DONE,
-            handler_f=self._process_client_done,
-            fl_ctx=fl_ctx,
+            message_handle_func=self._process_client_done,
         )
 
     def _trigger_stop(self, fl_ctx: FLContext, error=None):
@@ -249,7 +249,7 @@ class XGBController(Controller):
                 status.xgb_done = client_done
             status.last_op_time = time.time()
 
-    def _process_client_done(self, channel: str, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
+    def _process_client_done(self, topic: str, request: Shareable, fl_ctx: FLContext) -> Shareable:
         """Process the ClientDone report for a client
 
         Args:
@@ -260,7 +260,7 @@ class XGBController(Controller):
         Returns: reply to the client
 
         """
-        self.logger.debug(f"_process_client_done: {channel=} {topic=}")
+        self.logger.debug(f"_process_client_done: {topic=}")
         exit_code = request.get(Constant.MSG_KEY_EXIT_CODE)
 
         if exit_code == 0:

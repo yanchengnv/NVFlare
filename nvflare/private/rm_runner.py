@@ -120,7 +120,8 @@ class _RequestReceiver:
             assert isinstance(peer_ctx, FLContext)
             self.source = peer_ctx.get_identity_name()
             msg = request.get_cell_message()
-            assert isinstance(msg, Message)
+            if not isinstance(msg, Message):
+                raise RuntimeError(f"cannot get message from request: {type(msg)}")
             self.msg_secure = msg.get_header(MessageHeaderKey.SECURE, False)
             self.msg_optional = msg.get_header(MessageHeaderKey.OPTIONAL, False)
 
@@ -325,7 +326,7 @@ class ReliableMessenger(FLComponent):
             handler_info = self.registry.find(rm_channel, rm_topic)
             if not handler_info:
                 # no handler registered for this topic!
-                self.error(fl_ctx, "no handler registered for request")
+                self.error(fl_ctx, f"no handler registered for request: {rm_channel=} {rm_topic=}")
                 return make_reply(ReturnCode.TOPIC_UNKNOWN)
 
             # check whether the request is still standing or completed
@@ -486,6 +487,8 @@ class ReliableMessenger(FLComponent):
             the request will be sent only once without retrying.
 
         """
+        self.logger.info(f"Send RM: {target=} {channel=} {topic=} {per_msg_timeout=} {optional=} {secure=}")
+
         check_str("target", target)
         check_positive_number("per_msg_timeout", per_msg_timeout)
         if tx_timeout:
@@ -506,6 +509,7 @@ class ReliableMessenger(FLComponent):
         request.set_header(HEADER_TX_ID, tx_id)
         request.set_header(HEADER_OP, OP_REQUEST)
         request.set_header(HEADER_TOPIC, topic)
+        request.set_header(HEADER_CHANNEL, channel)
         request.set_header(HEADER_PER_MSG_TIMEOUT, per_msg_timeout)
         request.set_header(HEADER_TX_TIMEOUT, tx_timeout)
         try:

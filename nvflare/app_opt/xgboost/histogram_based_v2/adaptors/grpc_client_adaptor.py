@@ -160,6 +160,8 @@ class GrpcClientAdaptor(XGBClientAdaptor, FederatedServicer):
             if self._check_duplicate_seq("allgather", request.rank, request.sequence_number):
                 return pb2.AllgatherReply(receive_buffer=bytes())
 
+            self.logger.info("=== Got Allgather from XGB Client and trying to send to Flare Server via RM")
+
             rcv_buf, _ = self._send_all_gather(
                 rank=request.rank,
                 seq=request.sequence_number,

@@ -108,9 +108,9 @@ def generate_log_message(fl_ctx: FLContext, msg: str, ctx_keys=None):
 
     basic_ctx = "[" + ", ".join(ctx_items) + "]"
     extra_ctx = ""
-    if ctx_keys:
+    if ctx_keys and isinstance(ctx_keys, dict):
         ctx_items = []
-        for prop_key, ck in ctx_keys:
+        for prop_key, ck in ctx_keys.items():
             v = fl_ctx.get_prop(prop_key)
             if v:
                 ctx_items.append(f"{ck}={v}")

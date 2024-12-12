@@ -213,7 +213,6 @@ class TieController(Controller, ABC):
             channel=Constant.CHANNEL,
             topic=Constant.TOPIC_APP_REQUEST,
             handler_f=self._handle_app_request,
-            fl_ctx=fl_ctx,
         )
 
     def _trigger_stop(self, fl_ctx: FLContext, error=None):

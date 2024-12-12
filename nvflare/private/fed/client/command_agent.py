@@ -14,6 +14,7 @@
 
 from nvflare.apis.fl_constant import FLContextKey
 from nvflare.apis.fl_context import FLContext
+from nvflare.apis.shareable import Shareable
 from nvflare.apis.utils.fl_context_utils import gen_new_peer_ctx
 from nvflare.fuel.f3.cellnet.core_cell import Message as CellMessage
 from nvflare.fuel.f3.cellnet.core_cell import MessageHeaderKey, ReturnCode
@@ -77,6 +78,8 @@ class CommandAgent(object):
 
         assert isinstance(request, CellMessage), "request must be CellMessage but got {}".format(type(request))
         shareable = request.payload
+        if isinstance(shareable, Shareable):
+            shareable.set_cell_message(request)
 
         with self.engine.new_context() as fl_ctx:
             topic = request.get_header(MessageHeaderKey.TOPIC)

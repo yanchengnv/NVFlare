@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from nvflare.apis.fl_constant import FLContextKey, ServerCommandKey
+from nvflare.apis.shareable import Shareable
 from nvflare.apis.utils.fl_context_utils import gen_new_peer_ctx
 from nvflare.fuel.f3.cellnet.cell import Cell
 from nvflare.fuel.f3.cellnet.core_cell import MessageHeaderKey, ReturnCode, make_reply
@@ -102,6 +103,8 @@ class ServerCommandAgent(object):
 
         assert isinstance(request, CellMessage), "request must be CellMessage but got {}".format(type(request))
         data = request.payload
+        if isinstance(data, Shareable):
+            data.set_cell_message(request)
 
         topic = request.get_header(MessageHeaderKey.TOPIC)
         with self.engine.new_context() as fl_ctx:

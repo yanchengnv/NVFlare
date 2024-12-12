@@ -15,11 +15,11 @@ import threading
 from typing import List
 
 from nvflare.apis.aux_spec import AuxMessenger
+from nvflare.apis.fl_component import FLComponent
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.rm import RMEngine
 from nvflare.apis.shareable import Shareable
 from nvflare.apis.streaming import ConsumerFactory, ObjectProducer, StreamableEngine, StreamContext
-from nvflare.apis.fl_component import FLComponent
 
 from .rm_runner import ReliableMessenger
 from .stream_runner import ObjectStreamer
@@ -68,6 +68,7 @@ class MessagingEngine(StreamableEngine, RMEngine, FLComponent):
         secure=False,
     ) -> Shareable:
         self._open_reliable_messenger()
+        self.logger.info(f"trying to send RM: {target=} {channel=} {topic=} {per_msg_timeout=} {optional=} {secure=}")
         return self.reliable_messenger.send_request(
             target, channel, topic, request, per_msg_timeout, tx_timeout, fl_ctx, secure, optional
         )

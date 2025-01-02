@@ -14,7 +14,7 @@
 import os
 import tempfile
 import uuid
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import ReturnCode, Shareable, make_reply
@@ -154,7 +154,7 @@ class FileStreamer(StreamerBase):
         channel: str,
         topic: str,
         dest_dir: str = None,
-        stream_done_cb=None,
+        stream_status_cb=None,
         **cb_kwargs,
     ):
         """Register for stream processing on the receiving side.
@@ -164,12 +164,12 @@ class FileStreamer(StreamerBase):
             channel: the app channel
             topic: the app topic
             dest_dir: the destination dir for received file. If not specified, system temp dir is used
-            stream_done_cb: if specified, the callback to be called when the file is completely received
-            **cb_kwargs: the kwargs for the stream_done_cb
+            stream_status_cb: if specified, the callback to be called when the file is being received
+            **cb_kwargs: the kwargs for the stream_status_cb
 
         Returns: None
 
-        Notes: the stream_done_cb must follow stream_done_cb_signature as defined in apis.streaming.
+        Notes: the stream_status_cb must follow stream_status_cb_signature as defined in apis.streaming.
 
         """
         if not dest_dir:
@@ -186,7 +186,7 @@ class FileStreamer(StreamerBase):
             channel=channel,
             topic=topic,
             factory=_ChunkConsumerFactory(dest_dir),
-            stream_done_cb=stream_done_cb,
+            stream_status_cb=stream_status_cb,
             **cb_kwargs,
         )
 
@@ -195,7 +195,7 @@ class FileStreamer(StreamerBase):
         channel: str,
         topic: str,
         stream_ctx: StreamContext,
-        targets: List[str],
+        targets: Union[List[str], str],
         file_name: str,
         fl_ctx: FLContext,
         chunk_size=None,
@@ -261,7 +261,7 @@ class FileStreamer(StreamerBase):
     @staticmethod
     def get_file_name(stream_ctx: StreamContext):
         """Get the file base name property from stream context.
-        This method is intended to be used by the stream_done_cb() function of the receiving side.
+        This method is intended to be used by the stream_status_cb() function of the receiving side.
 
         Args:
             stream_ctx: the stream context
@@ -274,7 +274,7 @@ class FileStreamer(StreamerBase):
     @staticmethod
     def get_file_location(stream_ctx: StreamContext):
         """Get the file location property from stream context.
-        This method is intended to be used by the stream_done_cb() function of the receiving side.
+        This method is intended to be used by the stream_status_cb() function of the receiving side.
 
         Args:
             stream_ctx: the stream context
@@ -287,7 +287,7 @@ class FileStreamer(StreamerBase):
     @staticmethod
     def get_file_size(stream_ctx: StreamContext):
         """Get the file size property from stream context.
-        This method is intended to be used by the stream_done_cb() function of the receiving side.
+        This method is intended to be used by the stream_status_cb() function of the receiving side.
 
         Args:
             stream_ctx: the stream context

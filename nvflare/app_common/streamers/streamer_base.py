@@ -32,3 +32,7 @@ class StreamerBase:
     @staticmethod
     def get_rc(ctx: StreamContext):
         return ctx.get(StreamContextKey.RC)
+
+    @staticmethod
+    def stream_is_done(ctx: StreamContext):
+        return ctx.get(StreamContextKey.IS_DONE, False)

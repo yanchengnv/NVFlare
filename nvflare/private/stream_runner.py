@@ -50,15 +50,15 @@ class _ConsumerInfo:
         stream_ctx: StreamContext,
         factory: ConsumerFactory,
         consumer: ObjectConsumer,
-        stream_done_cb,
+        stream_status_cb,
         cb_kwargs,
     ):
         self.logger = logger
         self.factory = factory
         self.stream_ctx = stream_ctx
         self.consumer = consumer
-        self.stream_done_cb = stream_done_cb
-        self.stream_done_cb_kwargs = cb_kwargs
+        self.stream_status_cb = stream_status_cb
+        self.stream_status_cb_kwargs = cb_kwargs
         self.stream_start_time = time.time()
         self.last_msg_start_time = None
         self.last_msg_end_time = None
@@ -71,6 +71,16 @@ class _ConsumerInfo:
         self.last_msg_start_time = time.time()
         reply = self.consumer.consume(msg, self.stream_ctx, fl_ctx)
         self.last_msg_end_time = time.time()
+
+        self.stream_ctx[StreamContextKey.IS_DONE] = False
+        if self.stream_status_cb is not None:
+            try:
+                self.stream_status_cb(self.stream_ctx, fl_ctx, **self.stream_status_cb_kwargs)
+            except Exception as ex:
+                self.logger.error(
+                    f"exception from stream_status_cb {self.stream_status_cb.__name__}: {secure_format_exception(ex)}"
+                )
+                raise ex
         return reply
 
     def stream_done(self, rc: str, fl_ctx: FLContext):
@@ -83,12 +93,13 @@ class _ConsumerInfo:
             )
             self.stream_ctx[StreamContextKey.RC] = ReturnCode.EXECUTION_EXCEPTION
 
-        if self.stream_done_cb:
+        self.stream_ctx[StreamContextKey.IS_DONE] = True
+        if self.stream_status_cb is not None:
             try:
-                self.stream_done_cb(self.stream_ctx, fl_ctx, **self.stream_done_cb_kwargs)
+                self.stream_status_cb(self.stream_ctx, fl_ctx, **self.stream_status_cb_kwargs)
             except Exception as ex:
                 self.logger.error(
-                    f"exception from stream_done_cb {self.stream_done_cb.__name__}: {secure_format_exception(ex)}"
+                    f"exception from stream_status_cb {self.stream_status_cb.__name__}: {secure_format_exception(ex)}"
                 )
 
         try:
@@ -138,7 +149,7 @@ class ObjectStreamer(FLComponent):
         channel: str,
         topic: str,
         factory: ConsumerFactory,
-        stream_done_cb=None,
+        stream_status_cb=None,
         **cb_kwargs,
     ):
         """Register a ConsumerFactory for specified app channel and topic.
@@ -153,7 +164,7 @@ class ObjectStreamer(FLComponent):
             channel: app channel
             topic: app topic
             factory: the factory to be registered
-            stream_done_cb: the CB to be called when a stream is done
+            stream_status_cb: the CB to be called when a stream is progressing
 
         Returns: None
 
@@ -161,9 +172,9 @@ class ObjectStreamer(FLComponent):
         check_str("channel", channel)
         check_str("topic", topic)
         check_object_type("factory", factory, ConsumerFactory)
-        if stream_done_cb is not None:
-            check_callable("stream_done_cb", stream_done_cb)
-        self.registry.set(channel, topic, (factory, stream_done_cb, cb_kwargs))
+        if stream_status_cb is not None:
+            check_callable("stream_status_cb", stream_status_cb)
+        self.registry.set(channel, topic, (factory, stream_status_cb, cb_kwargs))
         self.logger.info(f"registered processor_factory: {channel=} {topic=} {factory.__class__.__name__}")
 
     @staticmethod
@@ -234,9 +245,9 @@ class ObjectStreamer(FLComponent):
             self.error(request, f"no stream processing info registered for {channel}:{topic}")
             return make_reply(ReturnCode.EXECUTION_EXCEPTION)
 
-        factory, stream_done_db, cb_kwargs = factory_info
+        factory, stream_status_cb, cb_kwargs = factory_info
 
-        self.debug(request, "received stream request")
+        self.debug(request, "received streaming request")
         with self.tx_lock:
             info = self.tx_table.get(tx_id)
             if info:
@@ -275,7 +286,7 @@ class ObjectStreamer(FLComponent):
                         factory=factory,
                         consumer=consumer,
                         stream_ctx=stream_ctx,
-                        stream_done_cb=stream_done_db,
+                        stream_status_cb=stream_status_cb,
                         cb_kwargs=cb_kwargs,
                     )
                     self.tx_table[tx_id] = info
@@ -345,8 +356,8 @@ class ObjectStreamer(FLComponent):
         targets: List[str],
         producer: ObjectProducer,
         fl_ctx: FLContext,
-        secure=False,
         optional=False,
+        secure=False,
     ) -> Tuple[str, Any]:
         if not stream_ctx:
             stream_ctx = StreamContext()
@@ -371,8 +382,8 @@ class ObjectStreamer(FLComponent):
                 return ReturnCode.TASK_ABORTED, None
 
             try:
-                request, timeout = producer.produce(stream_ctx, fl_ctx)
-                self.logger.debug(f"produce from {producer.__class__.__name__}: {seq=} {timeout=} {tx_id=}")
+                request, r = producer.produce(stream_ctx, fl_ctx)
+                self.logger.debug(f"produce from {producer.__class__.__name__}: {seq=} {r=} {tx_id=}")
             except Exception as ex:
                 if seq > 0:
                     self._notify_abort_streaming(targets, tx_id, secure, fl_ctx)
@@ -385,9 +396,10 @@ class ObjectStreamer(FLComponent):
 
             if request is None:
                 # end of the streaming
+                # the returned r is the result back to the caller
                 if seq > 0:
                     self._notify_abort_streaming(targets, tx_id, secure, fl_ctx)
-                return ReturnCode.OK, None
+                return ReturnCode.OK, r
 
             if not isinstance(request, Shareable):
                 if seq > 0:
@@ -396,6 +408,8 @@ class ObjectStreamer(FLComponent):
                     f"Producer {producer.__class__.__name__} must produce Shareable but got {type(request)}"
                 )
 
+            # the returned r is timeout value for the request
+            timeout = r
             if not isinstance(timeout, float):
                 if seq > 0:
                     self._notify_abort_streaming(targets, tx_id, secure, fl_ctx)
@@ -435,6 +449,7 @@ class ObjectStreamer(FLComponent):
             self.logger.debug("got replies from receivers")
             result = producer.process_replies(replies, stream_ctx, fl_ctx)
             self.logger.debug(f"got processed result from producer: {result}")
+
             if result is not None:
                 # this is end of the streaming
                 if abort_signal and abort_signal.triggered:

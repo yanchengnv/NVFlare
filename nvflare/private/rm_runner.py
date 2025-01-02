@@ -292,6 +292,10 @@ class ReliableMessenger(FLComponent):
         self.registry.set(channel, topic, (handler_f, handler_kwargs))
         self.logger.info(f"registered RM handler: {channel=} {topic=} {handler_f.__name__}")
 
+    def deregister_request_handler(self, channel: str, topic: str):
+        self.registry.unset(channel, topic)
+        self.logger.info(f"deregistered RM handler: {channel=} {topic=}")
+
     def _get_or_create_receiver(self, channel: str, topic: str, request: Shareable, handler_info) -> _RequestReceiver:
         tx_id = request.get_header(HEADER_TX_ID)
         if not tx_id:

@@ -70,7 +70,15 @@ class MessagingEngine(StreamableEngine, RMEngine, FLComponent):
         self._open_reliable_messenger()
         self.logger.info(f"trying to send RM: {target=} {channel=} {topic=} {per_msg_timeout=} {optional=} {secure=}")
         return self.reliable_messenger.send_request(
-            target, channel, topic, request, per_msg_timeout, tx_timeout, fl_ctx, secure, optional
+            target=target,
+            channel=channel,
+            topic=topic,
+            request=request,
+            per_msg_timeout=per_msg_timeout,
+            tx_timeout=tx_timeout,
+            fl_ctx=fl_ctx,
+            secure=secure,
+            optional=optional,
         )
 
     def shutdown_reliable_messenger(self):
@@ -83,11 +91,11 @@ class MessagingEngine(StreamableEngine, RMEngine, FLComponent):
         channel: str,
         topic: str,
         factory: ConsumerFactory,
-        stream_done_cb=None,
+        stream_status_cb=None,
         **cb_kwargs,
     ):
         self._open_streamer()
-        return self.streamer.register_stream_processing(channel, topic, factory, stream_done_cb, **cb_kwargs)
+        return self.streamer.register_stream_processing(channel, topic, factory, stream_status_cb, **cb_kwargs)
 
     def stream_objects(
         self,

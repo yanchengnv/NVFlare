@@ -23,6 +23,7 @@ class StreamContextKey:
     CHANNEL = "__channel__"
     TOPIC = "__topic__"
     RC = "__RC__"
+    IS_DONE = "__is_done__"
 
 
 class ObjectProducer(ABC):
@@ -41,7 +42,9 @@ class ObjectProducer(ABC):
             stream_ctx: stream context data
             fl_ctx: The FLContext object
 
-        Returns: a tuple of (Shareable object to be sent, timeout for sending this object)
+        Returns: a tuple of (X, Y):
+            If there is data to be sent, X is a Shareable object to be sent, and Y is the timeout value for sending it;
+            If there is no data to send, X must be None, and Y is the result returned to the stream caller.
 
         """
         pass
@@ -149,13 +152,13 @@ class ConsumerFactory(ABC):
         pass
 
 
-def stream_done_cb_signature(stream_ctx: StreamContext, fl_ctx: FLContext, **kwargs):
-    """This is the signature of stream_done_cb.
+def stream_status_cb_signature(stream_ctx: StreamContext, fl_ctx: FLContext, **kwargs):
+    """This is the signature of stream_status_cb.
 
     Args:
         stream_ctx: context of the stream
         fl_ctx: FLContext object
-        **kwargs: the kwargs specified when registering the stream_done_cb.
+        **kwargs: the kwargs specified when registering the stream_status_cb.
 
     Returns: None
 
@@ -177,7 +180,7 @@ class StreamableEngine(ABC):
         fl_ctx: FLContext,
         optional=False,
         secure=False,
-    ):
+    ) -> Tuple[str, Any]:
         """Send a stream of Shareable objects to receivers.
 
         Args:
@@ -190,7 +193,7 @@ class StreamableEngine(ABC):
             optional: whether the stream is optional
             secure: whether to use P2P security
 
-        Returns: result from the generator's reply processing
+        Returns: result from the generator's reply processing: a tuple of (ReturnCode, Result Data)
 
         """
         pass
@@ -201,7 +204,7 @@ class StreamableEngine(ABC):
         channel: str,
         topic: str,
         factory: ConsumerFactory,
-        stream_done_cb=None,
+        stream_status_cb=None,
         **cb_kwargs,
     ):
         """Register a ConsumerFactory for specified app channel and topic.
@@ -216,9 +219,13 @@ class StreamableEngine(ABC):
             channel: app channel
             topic: app topic
             factory: the factory to be registered
-            stream_done_cb: the callback to be called when streaming is done on receiving side
+            stream_status_cb: the callback to be called when streaming status is progressing
 
         Returns: None
+
+        The stream_status_cb is called on the stream receiving side every time a data segment is received from the
+        stream sending side. The StreamContextKey.IS_DONE property in the StreamContext indicates whether the
+        stream is finished.
 
         """
         pass

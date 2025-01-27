@@ -1,0 +1,37 @@
+{
+  "format_version": 2,
+  "executors": [
+    {
+      "tasks": [
+        "train"
+      ],
+      "executor": {
+        "name": "LearnerExecutor",
+        "args": {
+          "learner_id": "np_learner"
+        }
+      }
+    }
+  ],
+  "task_result_filters": [
+    {
+      "tasks": ["train", "validate"],
+      "filters":[
+          {
+          "path": "unsafe_job.UnsafeJobDetector",
+          "args": {}
+        }
+      ]
+    }
+  ],
+  "task_data_filters": [
+  ],
+  "components": [
+    {
+      "id": "np_learner",
+      "path": "np_learner.NPLearner",
+      "args": {
+      }
+    }
+  ]
+}

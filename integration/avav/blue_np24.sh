@@ -1,0 +1,1 @@
+python np24_trainer.py -w blue03 -s blue -a ndas_1

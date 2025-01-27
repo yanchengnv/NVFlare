@@ -1,0 +1,17 @@
+{
+  "allow_adhoc_conns": true,
+  "backbone_conn_gen": 2,
+  "internal": {
+    "scheme": "tcp",
+    "resources": {
+      "host": "localhost"
+    }
+  },
+  "adhoc": {
+    "scheme": "tcp",
+    "resources": {
+      "host": "localhost",
+      "secure": false
+    }
+  }
+}

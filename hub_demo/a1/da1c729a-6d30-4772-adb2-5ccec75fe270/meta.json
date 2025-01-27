@@ -1,0 +1,32 @@
+{
+    "name": "numpy-sag-bcst",
+    "resource_spec": {},
+    "min_clients": 2,
+    "deploy_map": {
+        "app": [
+            "@ALL"
+        ]
+    },
+    "stats_pool_config": {
+        "save_pools": [
+            "request_processing",
+            "request_response",
+            "*"
+        ]
+    },
+    "submitter_name": "admin",
+    "submitter_org": "global",
+    "submitter_role": "project_admin",
+    "job_folder_name": "numpy",
+    "job_id": "da1c729a-6d30-4772-adb2-5ccec75fe270",
+    "submit_time": 1699548522.873471,
+    "submit_time_iso": "2023-11-09T11:48:42.873471-05:00",
+    "start_time": "",
+    "duration": "N/A",
+    "status": "SUBMITTED",
+    "schedule_history": [
+        "2023-11-09 11:48:42: scheduled"
+    ],
+    "schedule_count": 1,
+    "last_schedule_time": 1699548522.978443
+}

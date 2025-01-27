@@ -1,0 +1,1 @@
+python numpy_trainer.py -w bluesw -s blue -a ndas_1 -u stcp://nvcj:28002

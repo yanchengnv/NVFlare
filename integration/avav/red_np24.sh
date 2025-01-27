@@ -1,0 +1,1 @@
+python np24_trainer.py -w red03 -s red -a ndas_1

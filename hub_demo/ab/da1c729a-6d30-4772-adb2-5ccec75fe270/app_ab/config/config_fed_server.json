@@ -1,0 +1,53 @@
+{
+    "format_version": 2,
+    "server": {
+        "heart_beat_timeout": 600,
+        "task_request_interval": 0.1
+    },
+    "task_data_filters": [],
+    "task_result_filters": [],
+    "components": [
+        {
+            "id": "persistor",
+            "path": "nvflare.app_common.np.np_model_persistor.NPModelPersistor",
+            "args": {}
+        },
+        {
+            "id": "shareable_generator",
+            "path": "nvflare.app_common.shareablegenerators.full_model_shareable_generator.FullModelShareableGenerator",
+            "args": {}
+        },
+        {
+            "id": "aggregator",
+            "path": "nvflare.app_common.aggregators.intime_accumulate_model_aggregator.InTimeAccumulateWeightedAggregator",
+            "args": {
+                "expected_data_kind": "WEIGHTS"
+            }
+        },
+        {
+            "id": "pipe",
+            "path": "nvflare.fuel.utils.pipe.cell_pipe.CellPipe",
+            "args": {
+                "mode": "active",
+                "token": "{JOB_ID}",
+                "root_url": "{T1_ROOT_URL}",
+                "site_name": "site_a",
+                "secure_mode": "{T1_SECURE_TRAIN}",
+                "workspace_dir": "{T1_WORKSPACE}"
+            },
+            "comment": "this is config for T2 server to communicate with T1 client"
+        }
+    ],
+    "workflows": [
+        {
+            "id": "controller",
+            "path": "nvflare.app_common.hub.hub_controller.HubController",
+            "args": {
+                "pipe_id": "pipe"
+            }
+        }
+    ],
+    "T1_WORKSPACE": "/Users/yanc/NVFlare/hub_demo/a1/startup/..",
+    "T1_ROOT_URL": "tcp://localhost:8002",
+    "T1_SECURE_TRAIN": false
+}

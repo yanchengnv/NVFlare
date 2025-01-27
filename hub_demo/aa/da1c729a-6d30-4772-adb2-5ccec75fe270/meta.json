@@ -1,0 +1,26 @@
+{
+    "name": "app_a1",
+    "deploy_map": {
+        "app_a1": [
+            "@ALL"
+        ]
+    },
+    "min_clients": 1,
+    "job_id": "da1c729a-6d30-4772-adb2-5ccec75fe270",
+    "submitter_name": "admin",
+    "submitter_org": "global",
+    "submitter_role": "project_admin",
+    "scope": "",
+    "from_hub_site": "a1",
+    "job_folder_name": "da1c729a-6d30-4772-adb2-5ccec75fe270_t2",
+    "submit_time": 1699548523.030654,
+    "submit_time_iso": "2023-11-09T11:48:43.030654-05:00",
+    "start_time": "",
+    "duration": "N/A",
+    "status": "SUBMITTED",
+    "schedule_history": [
+        "2023-11-09 11:48:43: scheduled"
+    ],
+    "schedule_count": 1,
+    "last_schedule_time": 1699548523.652355
+}

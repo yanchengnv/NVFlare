@@ -24,24 +24,15 @@ from nvflare.edge.web.models.result_report import ResultReport
 from nvflare.edge.web.models.result_response import ResultResponse
 from nvflare.edge.web.models.task_request import TaskRequest
 from nvflare.edge.web.models.task_response import TaskResponse
-from nvflare.fuel.utils.validation_utils import check_non_negative_int, check_non_negative_number
 from nvflare.security.logging import secure_format_exception
 
 
 class EdgeDispatchExecutor(EdgeTaskExecutor):
     """This executor dispatches tasks to edge devices and wait for the response from all devices"""
 
-    def __init__(self, wait_time=300.0, min_devices=0, aggregator_id=None):
+    def __init__(self, aggregator_id=None):
         EdgeTaskExecutor.__init__(self)
 
-        check_non_negative_number("wait_time", wait_time)
-        check_non_negative_int("min_devices", min_devices)
-
-        self.wait_time = wait_time
-        self.min_devices = min_devices
-        self.task_sequence = 0
-        self.task_name = None
-        self.task_id = None
         self.task_data = None
         self.start_time = None
         self.devices = None

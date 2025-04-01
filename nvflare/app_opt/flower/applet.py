@@ -309,6 +309,7 @@ class FlowerServerApplet(Applet):
         return self.last_check_stopped, self.last_check_status
 
     def _query_for_run_status(self):
+        self.logger.info("############### QUERY LS ================")
         # check whether the app is finished
         flwr_ls_cmd = self._flower_command("ls")
         try:

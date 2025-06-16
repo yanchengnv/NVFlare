@@ -161,5 +161,6 @@ class ProtoExecutor:
             raise RuntimeError(f"Step {i} device info: {err}")
 
         # everything is okay
+        print(f"Step {i} {req_type}: OK")
         self.current_step += 1
         return resp

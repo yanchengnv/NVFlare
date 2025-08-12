@@ -108,7 +108,20 @@ class Commander:
         download_files(self.cell, result, timeout)
         return result
 
+    def stop_job(self):
+        if not self.job_id:
+            return
+
+        self.send_command("bye", data=None)
+        self.job_id = None
+
     def close(self):
+        """Close the session.
+        Note: closing session does not automatically stop the job.
+
+        Returns: None
+
+        """
         FileDownloader.shutdown()
         if self.sess:
             self.sess.close()

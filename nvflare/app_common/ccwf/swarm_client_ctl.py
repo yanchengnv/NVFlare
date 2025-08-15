@@ -432,7 +432,7 @@ class SwarmClientController(ClientSideController):
         aggr_thread = threading.Thread(target=self._monitor_gather)
         aggr_thread.daemon = True
         aggr_thread.start()
-        self.log_info(fl_ctx, "started aggregator thread")
+        self.log_debug(fl_ctx, "started aggregator thread")
 
     def handle_event(self, event_type: str, fl_ctx: FLContext):
         if event_type == AppEventType.GLOBAL_BEST_MODEL_AVAILABLE:
@@ -601,7 +601,7 @@ class SwarmClientController(ClientSideController):
         assert isinstance(peer_ctx, FLContext)
         client_name = peer_ctx.get_identity_name()
         current_round = request.get_header(AppConstants.CURRENT_ROUND)
-        self.log_info(fl_ctx, f"got result submission request {topic} from {client_name} for round {current_round}")
+        self.log_debug(fl_ctx, f"got result submission request {topic} from {client_name} for round {current_round}")
 
         gatherer = self.gatherer
         if not gatherer:
@@ -609,11 +609,11 @@ class SwarmClientController(ClientSideController):
             # or from a late client after I already finished gathering.
             if current_round <= self.last_aggr_round_done:
                 # late client case - drop the result
-                self.log_info(fl_ctx, f"reject from late {client_name} for round {current_round}")
+                self.log_warning(fl_ctx, f"reject from late {client_name} for round {current_round}")
                 return make_reply(ReturnCode.MODEL_UNRECOGNIZED)
 
             # case of fast client - ask to try again
-            self.log_info(
+            self.log_debug(
                 fl_ctx, f"got submission result from {client_name} for round {current_round} before gatherer setup"
             )
             return make_reply(ReturnCode.SERVICE_UNAVAILABLE)
@@ -628,7 +628,7 @@ class SwarmClientController(ClientSideController):
 
         # check whether this client is permitted to submit result
         rc = gatherer.can_accept_submission(client_name, request, fl_ctx)
-        self.log_info(fl_ctx, f"got permission from gatherer: {rc}")
+        self.log_debug(fl_ctx, f"got permission from gatherer: {rc}")
         return make_reply(rc)
 
     def _process_learn_result(self, request: Shareable, fl_ctx: FLContext, abort_signal: Signal) -> Shareable:

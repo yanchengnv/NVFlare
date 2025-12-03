@@ -13,7 +13,6 @@
 # limitations under the License.
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 from nvflare.apis.fl_exception import RunAborted
 from nvflare.fox import fox
@@ -35,16 +34,12 @@ class _Waiter(threading.Event):
 
 class SimBackend(Backend):
 
-    def __init__(self, target_obj_name: str, target_app: App, target_obj, abort_signal, thread_executor, max_workers: int = 100):
+    def __init__(self, target_obj_name: str, target_app: App, target_obj, abort_signal, thread_executor):
         Backend.__init__(self, abort_signal)
         self.target_obj_name = target_obj_name
         self.target_app = target_app
         self.target_obj = target_obj
         self.executor = thread_executor
-        # Separate executor for nested calls to avoid deadlock when call_target is called
-        # from within an executor thread. Size it to handle all potential concurrent nested calls.
-        # Use max_workers to ensure we don't bottleneck.
-        self.nested_executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="nested-call")
 
     def _get_func(self, func_name):
         return self.target_app.find_collab_method(self.target_obj, func_name)
@@ -60,43 +55,30 @@ class SimBackend(Backend):
         expect_result = call_opt.expect_result
         timeout = call_opt.timeout
 
-        if not expect_result:
-            # Fire and forget - submit to nested executor and return immediately
-            self.nested_executor.submit(self._execute_func, target_name, func_name, func, args, kwargs)
-            return None
+        waiter = None
+        if expect_result:
+            waiter = _Waiter()
 
-        # Execute with timeout support using separate executor to avoid deadlock
-        future = self.nested_executor.submit(self._execute_func, target_name, func_name, func, args, kwargs)
-        
-        start_time = time.time()
-        while True:
-            # Check abort signal
-            if self.abort_signal.triggered:
-                return RunAborted("job is aborted")
-            
-            try:
-                # Wait for result with short polling interval to check abort signal
-                result = future.result(timeout=0.1)
-                return result
-            except FutureTimeoutError:
-                # Check if overall timeout exceeded
+        self.executor.submit(self._run_func, waiter, target_name, func_name, func, args, kwargs)
+        if waiter:
+            start_time = time.time()
+            while True:
+                if self.abort_signal.triggered:
+                    waiter.result = RunAborted("job is aborted")
+
+                ok = waiter.wait(0.1)
+                if ok:
+                    break
+
                 waited = time.time() - start_time
                 if waited > timeout:
-                    return TimeoutError(f"function {func_name} timed out after {waited} seconds")
-                # Otherwise continue polling
-            except Exception as ex:
-                # Function raised an exception
-                return ex
+                    # timed out
+                    waiter.result = TimeoutError(f"function {func_name} timed out after {waited} seconds")
+                    break
 
-    def _execute_func(self, target_name, func_name, func, args, kwargs):
-        """Execute function with preprocessing and result filtering."""
-        try:
-            ctx, kwargs = self._preprocess(target_name, func_name, func, kwargs)
-            result = func(*args, **kwargs)
-            result = self.target_app.apply_outgoing_result_filters(target_name, func_name, result, ctx)
-            return result
-        except Exception as ex:
-            raise
+            return waiter.result
+        else:
+            return None
 
     def _preprocess(self, target_name, func_name, func, kwargs):
         caller_ctx = kwargs.pop(CollabMethodArgName.CONTEXT)

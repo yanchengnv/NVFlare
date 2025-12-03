@@ -30,10 +30,10 @@ from nvflare.fuel.utils.log_utils import get_obj_logger
 class AppRunner:
 
     def _prepare_app_backends(self, app: App):
-        bes = {"": SimBackend("", app, app, self.abort_signal, self.thread_executor)}
+        bes = {"": SimBackend("", app, app, self.abort_signal, self.thread_executor, self.max_workers)}
         targets = app.get_collab_objects()
         for name, obj in targets.items():
-            bes[name] = SimBackend(name, app, obj, self.abort_signal, self.thread_executor)
+            bes[name] = SimBackend(name, app, obj, self.abort_signal, self.thread_executor, self.max_workers)
         return bes
 
     @staticmethod
@@ -100,6 +100,7 @@ class AppRunner:
         server_app.backend_type = BackendType.SIMULATION
         self.server_app = server_app
         self.client_app = client_app
+        self.max_workers = max_workers  # Store for use in _prepare_app_backends
         self.thread_executor = ThreadPoolExecutor(max_workers=max_workers)
 
         if isinstance(num_clients, int):
@@ -132,6 +133,9 @@ class AppRunner:
 
         for name, app in client_apps.items():
             backends[name] = self._prepare_app_backends(app)
+        
+        # Store all backends for cleanup
+        self.all_backends = backends
 
         exp_id = str(uuid.uuid4())
 
@@ -180,7 +184,13 @@ class AppRunner:
             self.abort_signal.trigger(True)
             result = None
         finally:
+            # Shutdown main executor
             self.thread_executor.shutdown(wait=False, cancel_futures=True)
+            # Shutdown all nested executors in backends
+            for app_name, app_backends in self.all_backends.items():
+                for backend_name, backend in app_backends.items():
+                    if hasattr(backend, 'nested_executor'):
+                        backend.nested_executor.shutdown(wait=False, cancel_futures=True)
         self.logger.info(f"Experiment results are in {self.exp_dir}")
         return result
 
